@@ -1,0 +1,165 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id        String   @id @default(cuid())
+  name      String 
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PG {
+  id        String    @id @default(cuid())
+  name      String
+  type      PgType
+  location  String
+  rooms     Room[]
+  members   Member[]
+  staff     Staff[]
+  payments  Payment[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Staff {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  pg        PG       @relation(fields: [pgId], references: [id])
+  pgId      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Room {
+  id        String   @id @default(cuid())
+  roomNo    String
+  rent      Float
+  capacity  Int
+  members   Member[]
+  PG        PG?      @relation(fields: [pGId], references: [id])
+  pGId      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([roomNo, pGId])
+}
+
+model Member {
+  id            String    @id @default(cuid())
+  memberId      String    @unique // auto generated unique member ID
+  name          String
+  age           Int
+  gender        Gender
+  location      String
+  email         String    @unique
+  phone         String    @unique
+  work         String
+  photoUrl      String? // passport photo
+  aadharUrl     String? // aadhar card photo
+  rentType      RentType
+  advanceAmount Float
+  pgId          String
+  pg            PG        @relation(fields: [pgId], references: [id])
+  roomId        String? // assigned by admin
+  room          Room?     @relation(fields: [roomId], references: [id])
+  dateOfJoining DateTime  @default(now())
+  payment       Payment[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model RegisteredMember {
+  id         String   @id @default(cuid())
+  name       String
+  age        Int
+  gender     Gender
+  location   String
+  pgLocation String
+  email      String   @unique
+  phone      String   @unique
+  work       String
+  photoUrl   String? // passport photo
+  aadharUrl  String? // aadhar card photo
+  rentType   RentType
+  pgType     PgType
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Payment {
+  id       String @id @default(cuid())
+  memberId String
+  member   Member @relation(fields: [memberId], references: [id])
+
+  pgId String
+  pg   PG     @relation(fields: [pgId], references: [id])
+
+  month                     Int // 1-12
+  year                      Int // e.g., 2025
+  amount                    Float
+  rentBillScreenshot        String
+  electricityBillScreenshot String
+
+  attemptNumber Int           @default(1) // 1 = first submission, 2 = second, etc.
+  status        PaymentStatus @default(PENDING)
+  approvedBy    String? // Admin id
+  approvedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([memberId, month, year, attemptNumber])
+  @@index([pgId, month, year])
+  @@index([memberId, month, year])
+}
+
+model DashboardStats {
+  id                    String   @id @default(cuid())
+  pgId                  String
+  month                 Int
+  year                  Int
+  totalMembers          Int
+  rentCollection        Float
+  newMembers            Int
+  paymentApprovals      Int
+  registrationApprovals Int
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum RegistrationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum RentType {
+  LONG_TERM
+  SHORT_TERM
+}
+
+enum PgType {
+  WOMENS
+  MENS
+}
