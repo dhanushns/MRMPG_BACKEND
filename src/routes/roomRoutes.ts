@@ -1,33 +1,45 @@
 import { Router } from "express";
 import {
-  createRoom,
-  getAllRooms,
+  getRooms,
   getRoomById,
+  createRoom,
   updateRoom,
   deleteRoom,
-  getRoomOccupancyStats,
+  getRoomsByLocation,
 } from "../controllers/roomController";
 import { validateBody, validateParams, validateQuery } from "../middlewares/validation";
+import { authenticateAdmin, authorizeAdmin } from "../middlewares/auth";
 import {
   createRoomSchema,
   updateRoomSchema,
-  idParamSchema,
-  paginationQuerySchema,
+  pgIdParamSchema,
+  pgIdAndRoomIdParamSchema,
+  locationParamSchema,
   roomFilterQuerySchema,
 } from "../validations/roomValidation";
-import { authenticateStaff, authorizeStaff } from "../middlewares/auth";
 
 const router = Router();
 
-// Protected rooms routes for authenticated staff
-router.use(authenticateStaff);
-router.use(authorizeStaff);
+// All routes require authentication and authorization
+router.use(authenticateAdmin);
+router.use(authorizeAdmin);
 
-router.post("/", validateBody(createRoomSchema), createRoom);
-router.get("/", validateQuery(roomFilterQuerySchema), getAllRooms);
-router.get("/occupancy-stats", getRoomOccupancyStats);
-router.get("/:id", validateParams(idParamSchema), getRoomById);
-router.put("/:id", validateParams(idParamSchema), validateBody(updateRoomSchema), updateRoom);
-router.delete("/:id", validateParams(idParamSchema), deleteRoom);
+// GET /rooms/location/:location - Get rooms by location
+router.get("/location/:location", validateParams(locationParamSchema), getRoomsByLocation);
+
+// GET /rooms/:pgId - Get all rooms of a specific PG
+router.get("/:pgId", validateParams(pgIdParamSchema), validateQuery(roomFilterQuerySchema), getRooms);
+
+// GET /rooms/:pgId/:roomId - Get a specific room by ID
+router.get("/:pgId/:roomId", validateParams(pgIdAndRoomIdParamSchema), getRoomById);
+
+// POST /rooms/:pgId - Create a new room in a specific PG
+router.post("/:pgId", validateParams(pgIdParamSchema), validateBody(createRoomSchema), createRoom);
+
+// PUT /rooms/:pgId/:roomId - Update a specific room
+router.put("/:pgId/:roomId", validateParams(pgIdAndRoomIdParamSchema), validateBody(updateRoomSchema), updateRoom);
+
+// DELETE /rooms/:pgId/:roomId - Delete a specific room
+router.delete("/:pgId/:roomId", validateParams(pgIdAndRoomIdParamSchema), deleteRoom);
 
 export default router;

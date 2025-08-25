@@ -19,6 +19,19 @@ export const idParamSchema = Joi.object({
   id: Joi.string().required(),
 });
 
+export const pgIdParamSchema = Joi.object({
+  pgId: Joi.string().required(),
+});
+
+export const pgIdAndRoomIdParamSchema = Joi.object({
+  pgId: Joi.string().required(),
+  roomId: Joi.string().required(),
+});
+
+export const locationParamSchema = Joi.object({
+  location: Joi.string().required().min(1).trim(),
+});
+
 export const paginationQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
   limit: Joi.number().integer().min(1).max(100).default(10),

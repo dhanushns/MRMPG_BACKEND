@@ -1,37 +1,22 @@
 import jwt, { SignOptions } from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { ENV } from "../config/env";
+import { PgType } from "@prisma/client";
 
 // JWT payload interface
 export interface JWTPayload {
   id: string;
   email: string;
   name: string;
+  pgType: PgType;
+  role: "admin";
   iat?: number;
   exp?: number;
 }
 
-// Staff-specific JWT payload (includes PG info)
-export interface StaffJWTPayload extends JWTPayload {
-  pgId?: string;
-  role: 'staff';
-}
-
-// Admin-specific JWT payload
-export interface AdminJWTPayload extends JWTPayload {
-  role: 'admin';
-}
-
 // Generate JWT token for admin
-export const generateAdminToken = (payload: Omit<AdminJWTPayload, 'iat' | 'exp' | 'role'>): string => {
+export const generateAdminToken = (payload: Omit<JWTPayload, 'iat' | 'exp' | 'role'>): string => {
   return jwt.sign({ ...payload, role: 'admin' }, ENV.JWT_SECRET, {
-    expiresIn: "24h",
-  });
-};
-
-// Generate JWT token for staff
-export const generateStaffToken = (payload: Omit<StaffJWTPayload, 'iat' | 'exp' | 'role'>): string => {
-  return jwt.sign({ ...payload, role: 'staff' }, ENV.JWT_SECRET, {
     expiresIn: "24h",
   });
 };

@@ -36,7 +36,7 @@ export const createPG = async (req: Request, res: Response): Promise<void> => {
           select: {
             rooms: true,
             members: true,
-            staff: true,
+            
             payments: true,
           },
         },
@@ -77,7 +77,7 @@ export const getAllPGs = async (req: Request, res: Response): Promise<void> => {
           select: {
             rooms: true,
             members: true,
-            staff: true,
+            
             payments: true,
           },
         },
@@ -130,22 +130,10 @@ export const getPGById = async (req: Request, res: Response): Promise<void> => {
           },
           orderBy: { dateOfJoining: 'desc' },
         },
-        staff: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            createdAt: true,
-            updatedAt: true,
-            pgId: true,
-          },
-          orderBy: { createdAt: 'desc' },
-        },
         _count: {
           select: {
             rooms: true,
             members: true,
-            staff: true,
             payments: true,
           },
         },
@@ -227,7 +215,7 @@ export const updatePG = async (req: Request, res: Response): Promise<void> => {
           select: {
             rooms: true,
             members: true,
-            staff: true,
+            
             payments: true,
           },
         },
@@ -262,7 +250,7 @@ export const deletePG = async (req: Request, res: Response): Promise<void> => {
           select: {
             rooms: true,
             members: true,
-            staff: true,
+            
             payments: true,
           },
         },
@@ -281,12 +269,11 @@ export const deletePG = async (req: Request, res: Response): Promise<void> => {
     if (
       existingPG._count.rooms > 0 ||
       existingPG._count.members > 0 ||
-      existingPG._count.staff > 0 ||
       existingPG._count.payments > 0
     ) {
       res.status(409).json({
         success: false,
-        message: "Cannot delete PG as it has associated rooms, members, staff, or payments",
+        message: "Cannot delete PG as it has associated rooms, members, or payments",
       } as ApiResponse<null>);
       return;
     }

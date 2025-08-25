@@ -10,12 +10,14 @@ export const createAdminSchema = Joi.object({
   name: Joi.string().required().min(2).max(100).trim(),
   email: Joi.string().email().required(),
   password: Joi.string().required().min(6).max(100),
+  pgType: Joi.string().valid('MENS', 'WOMENS').required(),
 });
 
 export const updateAdminSchema = Joi.object({
   name: Joi.string().optional().min(2).max(100).trim(),
   email: Joi.string().email().optional(),
   password: Joi.string().optional().min(6).max(100),
+  pgType: Joi.string().valid('MENS', 'WOMENS').optional(),
 }).min(1); // At least one field must be provided
 
 // Common validation schemas
@@ -26,4 +28,28 @@ export const idParamSchema = Joi.object({
 export const paginationQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
   limit: Joi.number().integer().min(1).max(100).default(10),
+});
+
+// Registered members query validation schema
+export const registeredMembersQuerySchema = Joi.object({
+  page: Joi.number().integer().min(1).default(1),
+  limit: Joi.number().integer().min(1).max(100).default(10),
+  search: Joi.string().optional().trim(),
+  gender: Joi.string().valid('MALE', 'FEMALE').optional(),
+  rentType: Joi.string().valid('LONG_TERM', 'SHORT_TERM').optional(),
+});
+
+// Member approval validation schema
+export const approveRejectMemberSchema = Joi.object({
+  status: Joi.string().valid('APPROVED', 'REJECTED').required(),
+  pgId: Joi.when('status', {
+    is: 'APPROVED',
+    then: Joi.string().required(),
+    otherwise: Joi.string().optional(),
+  }),
+  roomNo: Joi.string().optional(),
+  rentAmount: Joi.number().positive().optional(),
+  advanceAmount: Joi.number().min(0).optional(),
+  dateOfJoining: Joi.date().iso().optional(),
+  pgLocation: Joi.string().optional(),
 });

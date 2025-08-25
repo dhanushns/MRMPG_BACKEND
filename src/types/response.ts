@@ -1,4 +1,4 @@
-import { PG, Staff, Room, Member, Admin } from "@prisma/client";
+import { PG, Room, Member, Admin } from "@prisma/client";
 
 // Generic response types
 export interface ApiResponse<T> {
@@ -34,32 +34,27 @@ export interface PGResponse extends PG {
   _count?: {
     rooms: number;
     members: number;
-    staff: number;
     payments: number;
   };
 }
 
-// Staff response types
-export interface StaffResponse extends Omit<Staff, 'password'> {
-  pg?: PG;
-}
-
-export interface StaffLoginResponse {
-  staff: StaffWithPGResponse;
-  token: string;
-  expiresIn: string;
-}
-
-export interface StaffWithPGResponse extends Omit<Staff, 'password'> {
-  pg: PG;
-}
-
 // Member response types
-export interface MemberWithRoomResponse extends Member {
-  room: Room | null;
+export interface MemberPaymentStatus {
+  status: 'PAID' | 'PENDING' | 'OVERDUE';
+  month: string;
+  paymentDetails?: {
+    id: string;
+    amount: number;
+    paidDate: Date;
+  } | null;
 }
 
-export interface MembersPaginatedResponse extends PaginatedResponse<MemberWithRoomResponse> {
+export interface MemberInfo extends Member {
+  room: Room | null;
+  paymentStatus: MemberPaymentStatus | null;
+}
+
+export interface MembersPaginatedResponse extends PaginatedResponse<MemberInfo> {
   filterSummary?: {
     totalMembers: number;
     filteredCount: number;

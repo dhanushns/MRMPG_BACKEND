@@ -5,13 +5,26 @@ CREATE TYPE "public"."Gender" AS ENUM ('MALE', 'FEMALE');
 CREATE TYPE "public"."RegistrationStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
 
 -- CreateEnum
-CREATE TYPE "public"."PaymentStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
+CREATE TYPE "public"."PaymentStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'OVERDUE');
 
 -- CreateEnum
 CREATE TYPE "public"."RentType" AS ENUM ('LONG_TERM', 'SHORT_TERM');
 
 -- CreateEnum
 CREATE TYPE "public"."PgType" AS ENUM ('WOMENS', 'MENS');
+
+-- CreateTable
+CREATE TABLE "public"."Admin" (
+    "id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "password" TEXT NOT NULL,
+    "pgType" "public"."PgType" NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Admin_pkey" PRIMARY KEY ("id")
+);
 
 -- CreateTable
 CREATE TABLE "public"."PG" (
@@ -23,19 +36,6 @@ CREATE TABLE "public"."PG" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "PG_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "public"."Staff" (
-    "id" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
-    "email" TEXT NOT NULL,
-    "password" TEXT NOT NULL,
-    "pgId" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "Staff_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -61,6 +61,7 @@ CREATE TABLE "public"."Member" (
     "location" TEXT NOT NULL,
     "email" TEXT NOT NULL,
     "phone" TEXT NOT NULL,
+    "work" TEXT NOT NULL,
     "photoUrl" TEXT,
     "aadharUrl" TEXT,
     "rentType" "public"."RentType" NOT NULL,
@@ -84,6 +85,7 @@ CREATE TABLE "public"."RegisteredMember" (
     "pgLocation" TEXT NOT NULL,
     "email" TEXT NOT NULL,
     "phone" TEXT NOT NULL,
+    "work" TEXT NOT NULL,
     "photoUrl" TEXT,
     "aadharUrl" TEXT,
     "rentType" "public"."RentType" NOT NULL,
@@ -104,6 +106,7 @@ CREATE TABLE "public"."Payment" (
     "amount" DOUBLE PRECISION NOT NULL,
     "rentBillScreenshot" TEXT NOT NULL,
     "electricityBillScreenshot" TEXT NOT NULL,
+    "paidDate" TIMESTAMP(3) NOT NULL,
     "attemptNumber" INTEGER NOT NULL DEFAULT 1,
     "status" "public"."PaymentStatus" NOT NULL DEFAULT 'PENDING',
     "approvedBy" TEXT,
@@ -132,7 +135,7 @@ CREATE TABLE "public"."DashboardStats" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Staff_email_key" ON "public"."Staff"("email");
+CREATE UNIQUE INDEX "Admin_email_key" ON "public"."Admin"("email");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Room_roomNo_pGId_key" ON "public"."Room"("roomNo", "pGId");
@@ -160,9 +163,6 @@ CREATE INDEX "Payment_memberId_month_year_idx" ON "public"."Payment"("memberId",
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Payment_memberId_month_year_attemptNumber_key" ON "public"."Payment"("memberId", "month", "year", "attemptNumber");
-
--- AddForeignKey
-ALTER TABLE "public"."Staff" ADD CONSTRAINT "Staff_pgId_fkey" FOREIGN KEY ("pgId") REFERENCES "public"."PG"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."Room" ADD CONSTRAINT "Room_pGId_fkey" FOREIGN KEY ("pGId") REFERENCES "public"."PG"("id") ON DELETE SET NULL ON UPDATE CASCADE;

@@ -18,7 +18,7 @@ import { fileFilter } from "../utils/imageUpload";
 
 const router = Router();
 
-// Create multer upload for handling both images with dynamic storage
+
 const registrationUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {

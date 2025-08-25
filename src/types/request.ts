@@ -10,12 +10,14 @@ export interface CreateAdminRequest {
   name: string;
   email: string;
   password: string;
+  pgType: PgType;
 }
 
 export interface UpdateAdminRequest {
   name?: string;
   email?: string;
   password?: string;
+  pgType?: PgType;
 }
 
 // PG related types
@@ -29,29 +31,6 @@ export interface UpdatePGRequest {
   name?: string;
   type?: PgType;
   location?: string;
-}
-
-// Staff related types
-export interface StaffLoginRequest {
-  email: string;
-  password: string;
-}
-
-export interface CreateStaffRequest {
-  name: string;
-  email: string;
-  password: string;
-  pgId: string;
-}
-
-export interface UpdateStaffRequest {
-  name?: string;
-  email?: string;
-  password?: string;
-}
-
-export interface AssignStaffToPGRequest {
-  pgId: string;
 }
 
 // Room related types
@@ -93,18 +72,6 @@ export interface PersonalDataValidation {
   location: string;
 }
 
-export interface CreateRoomRequest {
-  roomNo: string;
-  rent: number;
-  capacity: number;
-}
-
-export interface UpdateRoomRequest {
-  roomNo?: string;
-  rent?: number;
-  capacity?: number;
-}
-
 // Member filter types
 export interface GetMembersFilterRequest {
   page?: number;
@@ -119,4 +86,14 @@ export interface GetMembersFilterRequest {
   advanceAmountMax?: number;
   dateJoinedFrom?: string; // ISO date string
   dateJoinedTo?: string; // ISO date string
+}
+
+// Member approval types
+export interface ApproveRejectMemberRequest {
+  status: 'APPROVED' | 'REJECTED';
+  pgId?: string;
+  roomNo?: string;
+  rentAmount?: number;
+  advanceAmount?: number;
+  dateOfJoining?: string; // ISO date string
 }

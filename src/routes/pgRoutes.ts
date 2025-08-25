@@ -8,14 +8,12 @@ import {
 } from "../controllers/pgController";
 import { validateBody, validateParams, validateQuery } from "../middlewares/validation";
 import { createPGSchema, updatePGSchema, idParamSchema, paginationQuerySchema } from "../validations/pgValidation";
-import { authenticateAdmin, authorizeAdmin } from "../middlewares/auth";
 
 const router = Router();
 
-router.use(authenticateAdmin);
-router.use(authorizeAdmin);
-
 // PG routes with validation
+// Temp routes
+
 router.post("/", validateBody(createPGSchema), createPG);
 router.get("/", validateQuery(paginationQuerySchema), getAllPGs);
 router.get("/:id", validateParams(idParamSchema), getPGById);

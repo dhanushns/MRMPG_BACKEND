@@ -9,9 +9,10 @@ datasource db {
 
 model Admin {
   id        String   @id @default(cuid())
-  name      String 
+  name      String
   email     String   @unique
   password  String
+  pgType    PgType
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -23,21 +24,9 @@ model PG {
   location  String
   rooms     Room[]
   members   Member[]
-  staff     Staff[]
   payments  Payment[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-}
-
-model Staff {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  password  String
-  pg        PG       @relation(fields: [pgId], references: [id])
-  pgId      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 }
 
 model Room {
@@ -63,14 +52,14 @@ model Member {
   location      String
   email         String    @unique
   phone         String    @unique
-  work         String
-  photoUrl      String? // passport photo
-  aadharUrl     String? // aadhar card photo
+  work          String
+  photoUrl      String?
+  aadharUrl     String?
   rentType      RentType
   advanceAmount Float
   pgId          String
   pg            PG        @relation(fields: [pgId], references: [id])
-  roomId        String? // assigned by admin
+  roomId        String?
   room          Room?     @relation(fields: [roomId], references: [id])
   dateOfJoining DateTime  @default(now())
   payment       Payment[]
@@ -88,8 +77,8 @@ model RegisteredMember {
   email      String   @unique
   phone      String   @unique
   work       String
-  photoUrl   String? // passport photo
-  aadharUrl  String? // aadhar card photo
+  photoUrl   String?
+  aadharUrl  String?
   rentType   RentType
   pgType     PgType
   createdAt  DateTime @default(now())
@@ -104,15 +93,16 @@ model Payment {
   pgId String
   pg   PG     @relation(fields: [pgId], references: [id])
 
-  month                     Int // 1-12
-  year                      Int // e.g., 2025
+  month                     Int
+  year                      Int
   amount                    Float
   rentBillScreenshot        String
   electricityBillScreenshot String
+  paidDate                  DateTime
 
-  attemptNumber Int           @default(1) // 1 = first submission, 2 = second, etc.
+  attemptNumber Int           @default(1)
   status        PaymentStatus @default(PENDING)
-  approvedBy    String? // Admin id
+  approvedBy    String? // Admin ID
   approvedAt    DateTime?
 
   createdAt DateTime @default(now())
@@ -133,8 +123,13 @@ model DashboardStats {
   newMembers            Int
   paymentApprovals      Int
   registrationApprovals Int
+  totalMemberTrend      Int
+  rentCollectionTrend   Int
+  newMemberTrend        Int
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
+
+  @@unique([pgId, month, year])
 }
 
 enum Gender {
@@ -152,6 +147,7 @@ enum PaymentStatus {
   PENDING
   APPROVED
   REJECTED
+  OVERDUE
 }
 
 enum RentType {

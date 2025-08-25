@@ -3,6 +3,8 @@ import {
   loginAdmin,
   createAdmin,
   getProfile,
+  updateProfile,
+  getManagedPGs,
 } from "../controllers/adminController";
 import { validateBody, validateParams, validateQuery } from "../middlewares/validation";
 import { authenticateAdmin, authorizeAdmin } from "../middlewares/auth";
@@ -12,28 +14,26 @@ import {
   updateAdminSchema,
   idParamSchema,
   paginationQuerySchema,
+  registeredMembersQuerySchema,
 } from "../validations/adminValidation";
-import { createStaffSchema, updateStaffSchema } from "../validations/staffValidation";
-import { createStaff, deleteStaff, getAllStaff, getStaffById, updateStaff } from "../controllers/adminController";
 
 const router = Router();
 
 // Public routes
 router.post("/login", validateBody(adminLoginSchema), loginAdmin);
 
+// Temporary route for creating admin, remove later
+router.post("/", validateBody(createAdminSchema), createAdmin);
+
 // Protected routes (authentication required)
 router.use(authenticateAdmin);
 router.use(authorizeAdmin);
 
-// Admin management routes 
-router.post("/", validateBody(createAdminSchema), createAdmin);
+// Admin management routes
 router.get("/profile", getProfile);
+router.put("/profile", validateBody(updateAdminSchema), updateProfile);
 
-// Staff management routes
-router.post("/staff", validateBody(createStaffSchema), createStaff);
-router.get("/staff", validateQuery(paginationQuerySchema), getAllStaff);
-router.get("/staff/:id", validateParams(idParamSchema), getStaffById);
-router.put("/staff/:id", validateParams(idParamSchema), validateBody(updateStaffSchema), updateStaff);
-router.delete("/staff/:id", validateParams(idParamSchema), deleteStaff);
+// PG management routes
+router.get("/pgs", getManagedPGs);
 
 export default router;
