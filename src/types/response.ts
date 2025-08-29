@@ -6,12 +6,6 @@ export interface ApiResponse<T> {
   message: string;
   data?: T;
   error?: string;
-}
-
-export interface PaginatedResponse<T> {
-  success: boolean;
-  message: string;
-  data: T[];
   pagination: {
     page: number;
     limit: number;
@@ -52,13 +46,4 @@ export interface MemberPaymentStatus {
 export interface MemberInfo extends Member {
   room: Room | null;
   paymentStatus: MemberPaymentStatus | null;
-}
-
-export interface MembersPaginatedResponse extends PaginatedResponse<MemberInfo> {
-  filterSummary?: {
-    totalMembers: number;
-    filteredCount: number;
-    pgName: string;
-    appliedFilters: string[];
-  };
 }

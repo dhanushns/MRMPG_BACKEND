@@ -53,3 +53,14 @@ export const approveRejectMemberSchema = Joi.object({
   dateOfJoining: Joi.date().iso().optional(),
   pgLocation: Joi.string().optional(),
 });
+
+// Members payment data query validation schema
+export const membersPaymentDataQuerySchema = Joi.object({
+  page: Joi.number().integer().min(1).default(1),
+  limit: Joi.number().integer().min(1).max(100).default(10),
+  search: Joi.string().optional().trim(),
+  rentType: Joi.string().valid('LONG_TERM', 'SHORT_TERM').optional(),
+  pgLocation: Joi.string().optional().trim(), // Can be comma-separated values
+  paymentStatus: Joi.string().valid('PAID', 'PENDING', 'OVERDUE').optional(),
+  approvalStatus: Joi.string().valid('APPROVED', 'PENDING', 'REJECTED').optional(),
+});

@@ -65,7 +65,7 @@ export const calculateAndUpdateDashboardStats = async (
             pgId: pg.id,
             month: currentMonth,
             year: currentYear,
-            status: "APPROVED",
+            approvalStatus: "APPROVED",
           },
           _sum: { amount: true },
         }),
@@ -87,7 +87,7 @@ export const calculateAndUpdateDashboardStats = async (
             pgId: pg.id,
             month: currentMonth,
             year: currentYear,
-            status: "APPROVED",
+            approvalStatus: "APPROVED",
           },
         }),
 
@@ -208,7 +208,7 @@ export const calculateAndUpdateDashboardStats = async (
       prisma.payment.count({
         where: {
           pgId: { in: pgIds },
-          status: "PENDING",
+          approvalStatus: "PENDING",
         },
       }),
       prisma.registeredMember.count({
@@ -447,7 +447,7 @@ export const getDashboardStats = async (
       prisma.payment.count({
         where: {
           pgId: { in: pgIds },
-          status: "PENDING",
+          approvalStatus: "PENDING",
         },
       }),
       prisma.registeredMember.count({
@@ -518,12 +518,21 @@ export const getAllMembers = async (
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
 
-    // Get filter parameters
+    // Get filter parameters from query - handle multiple values
     const pgId = req.query.pgId as string;
     const rentType = req.query.rentType as string;
-    const pgLocation = req.query.pgLocation as string;
     const status = req.query.status as string;
     const search = req.query.search as string;
+
+    // Parse comma-separated values for multi-select filters
+    const parseMultipleValues = (param: string | undefined): string[] => {
+      if (!param) return [];
+      return param.split(',').map(val => decodeURIComponent(val.trim())).filter(val => val.length > 0);
+    };
+
+    const locations = parseMultipleValues(req.query.location as string);
+    const pgLocations = parseMultipleValues(req.query.pgLocation as string);
+    const works = parseMultipleValues(req.query.work as string);
 
     // Get current month and year for payment status
     const now = new Date();
@@ -552,8 +561,33 @@ export const getAllMembers = async (
       whereClause.rentType = rentType;
     }
 
-    if (pgLocation) {
-      whereClause.location = { contains: pgLocation, mode: "insensitive" };
+    // Handle multiple locations
+    if (locations.length > 0) {
+      whereClause.location = { in: locations };
+    }
+
+    // Handle multiple work types
+    if (works.length > 0) {
+      whereClause.work = { in: works };
+    }
+
+    // Filter by multiple PG locations
+    if (pgLocations.length > 0) {
+      const pgsInLocation = await prisma.pG.findMany({
+        where: {
+          type: admin.pgType,
+          location: { in: pgLocations },
+        },
+        select: { id: true },
+      });
+      const pgIdsInLocation = pgsInLocation.map((pg) => pg.id);
+
+      if (pgIdsInLocation.length > 0) {
+        whereClause.pgId = { in: pgIdsInLocation };
+      } else {
+        // If no PGs found in locations, return empty result
+        whereClause.pgId = { in: [] };
+      }
     }
 
     if (search) {
@@ -589,16 +623,15 @@ export const getAllMembers = async (
           },
         },
         payment: {
-          where: {
-            month: currentMonth,
-            year: currentYear,
-          },
           select: {
             id: true,
-            status: true,
+            paymentStatus: true,
+            approvalStatus: true,
             amount: true,
             month: true,
             year: true,
+            dueDate: true,
+            overdueDate: true,
           },
         },
       },
@@ -611,48 +644,64 @@ export const getAllMembers = async (
 
     // Process members data to determine payment status
     const processedMembers = members.map((member) => {
-      // Determine payment status for current month
+      // Determine payment status based on due dates and approval status
       let paymentStatus: "PAID" | "PENDING" | "OVERDUE" = "PENDING";
 
-      const currentMonthPayment = member.payment.find(
-        (p) => p.month === currentMonth && p.year === currentYear
-      );
+      // Find the most relevant payment (closest to current date or current month)
+      const relevantPayment = member.payment.find(
+        (p) => {
+          // Prioritize current calendar month
+          if (p.month === currentMonth && p.year === currentYear) {
+            return true;
+          }
+          // Or find payment with due date closest to now
+          if (p.dueDate) {
+            const daysDiff = Math.abs((now.getTime() - new Date(p.dueDate).getTime()) / (1000 * 60 * 60 * 24));
+            return daysDiff <= 30; // Within 30 days
+          }
+          return false;
+        }
+      ) || member.payment[0]; // Fallback to first payment if any
 
-      if (currentMonthPayment) {
-        if (currentMonthPayment.status === "APPROVED") {
+      if (relevantPayment) {
+        // Calculate payment status based on approval status and due dates
+        if (relevantPayment.approvalStatus === "APPROVED") {
           paymentStatus = "PAID";
-        } else if (
-          currentMonthPayment.status === "REJECTED" ||
-          currentMonthPayment.status === "OVERDUE"
-        ) {
+        } else if (relevantPayment.approvalStatus === "REJECTED") {
           paymentStatus = "OVERDUE";
         } else {
-          paymentStatus = "PENDING";
+          // Check if payment is overdue based on overdueDate
+          if (relevantPayment.overdueDate && now > new Date(relevantPayment.overdueDate)) {
+            paymentStatus = "OVERDUE";
+          } else if (relevantPayment.dueDate && now > new Date(relevantPayment.dueDate)) {
+            // Past due date but within grace period
+            paymentStatus = "PENDING";
+          } else {
+            paymentStatus = "PENDING";
+          }
         }
       } else {
-        // Check if it's overdue (after 5 days from dateOfJoining in current month)
+        // No payment record found - check if member should have a payment by now
         const memberJoiningDate = new Date(member.dateOfJoining);
-        const currentMonthStart = new Date(currentYear, currentMonth - 1, 1);
-        const currentMonthEnd = new Date(currentYear, currentMonth, 0);
+        const oneMonthAfterJoining = new Date(memberJoiningDate);
+        oneMonthAfterJoining.setMonth(oneMonthAfterJoining.getMonth() + 1);
         
-        // If member joined in current month, calculate overdue based on joining date + 5 days
-        if (memberJoiningDate >= currentMonthStart && memberJoiningDate <= currentMonthEnd) {
-          const overdueDate = new Date(memberJoiningDate);
-          overdueDate.setDate(overdueDate.getDate() + 5);
-          if (now > overdueDate) {
-            paymentStatus = "OVERDUE";
-          }
-        } else if (memberJoiningDate < currentMonthStart) {
-          // If member joined before current month, use 5th of current month as deadline
-          const fifthOfMonth = new Date(currentYear, currentMonth - 1, 5);
-          if (now > fifthOfMonth) {
-            paymentStatus = "OVERDUE";
-          }
+        const overdueThreshold = new Date(oneMonthAfterJoining);
+        overdueThreshold.setDate(overdueThreshold.getDate() + 5);
+
+        if (now > overdueThreshold) {
+          paymentStatus = "OVERDUE";
+        } else if (now > oneMonthAfterJoining) {
+          paymentStatus = "PENDING";
+        } else {
+          // Member hasn't reached their first payment due date yet
+          paymentStatus = "PENDING";
         }
       }
 
       // Flatten the data structure - extract pg and room data to top level
       const { payment, pg, room, ...memberData } = member;
+      
       return {
         ...memberData,
         pgLocation: pg?.location || '',
@@ -661,6 +710,13 @@ export const getAllMembers = async (
         rent: room?.rent || 0,
         paymentStatus,
         status: paymentStatus, // Additional status field as requested
+        currentMonthPayment: relevantPayment ? {
+          paymentStatus: relevantPayment.paymentStatus,
+          approvalStatus: relevantPayment.approvalStatus,
+          amount: relevantPayment.amount,
+          dueDate: relevantPayment.dueDate,
+          overdueDate: relevantPayment.overdueDate,
+        } : null,
       };
     });
 
@@ -699,6 +755,216 @@ export const getAllMembers = async (
       success: false,
       message: "Internal server error",
       error: "Failed to retrieve members data",
+    } as ApiResponse<null>);
+  }
+};
+
+// Get filter options for dashboard member filtering
+export const getDashboardFilterOptions = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Get admin details to know their pgType
+    const admin = await prisma.admin.findUnique({
+      where: { id: req.admin.id },
+      select: { pgType: true },
+    });
+
+    if (!admin) {
+      res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Get all PGs of admin's type
+    const pgs = await prisma.pG.findMany({
+      where: { type: admin.pgType },
+      select: { id: true, name: true, location: true },
+    });
+
+    const pgIds = pgs.map((pg) => pg.id);
+
+    // Get pgLocation parameter for room filtering (cascading filter)
+    const pgLocation = req.query.pgLocation as string;
+
+    // Get unique work types from members of admin's PG type
+    const workTypes = await prisma.member.findMany({
+      where: { pgId: { in: pgIds } },
+      select: { work: true },
+      distinct: ["work"],
+    });
+
+    // Get unique locations from members of admin's PG type
+    const locations = await prisma.member.findMany({
+      where: { pgId: { in: pgIds } },
+      select: { location: true },
+      distinct: ["location"],
+    });
+
+    // Get unique PG locations for admin's PG type
+    const pgLocations = await prisma.pG.findMany({
+      where: { type: admin.pgType },
+      select: { location: true },
+      distinct: ["location"],
+    });
+
+    // Get PG options for admin's PG type
+    const pgOptions = await prisma.pG.findMany({
+      where: { type: admin.pgType },
+      select: { id: true, name: true, location: true },
+      orderBy: { name: "asc" },
+    });
+
+    // Get rooms based on selected pg location (cascading filter)
+    let roomsFilter: any = { pGId: { in: pgIds } };
+    if (pgLocation) {
+      // Parse comma-separated values for multiple PG locations
+      const selectedPgLocations = pgLocation
+        .split(',')
+        .map(loc => decodeURIComponent(loc.trim()))
+        .filter(loc => loc.length > 0);
+
+      if (selectedPgLocations.length > 0) {
+        const pgsInLocation = await prisma.pG.findMany({
+          where: {
+            type: admin.pgType,
+            location: { in: selectedPgLocations },
+          },
+          select: { id: true },
+        });
+        const pgIdsInLocation = pgsInLocation.map((pg) => pg.id);
+        roomsFilter = { pGId: { in: pgIdsInLocation } };
+      }
+    }
+
+    const rooms = await prisma.room.findMany({
+      where: roomsFilter,
+      select: { id: true, roomNo: true },
+      orderBy: { roomNo: "asc" },
+    });
+
+    // Get unique rent types from members of admin's PG type
+    const rentTypes = await prisma.member.findMany({
+      where: { pgId: { in: pgIds } },
+      select: { rentType: true },
+      distinct: ["rentType"],
+    });
+
+    // Build filter options with proper structure for frontend
+    const filters = [
+      {
+        id: "search",
+        type: "search" as const,
+        placeholder: "Search by name, memberId, email, phone...",
+        fullWidth: true,
+        gridSpan: 4,
+      },
+      {
+        id: "pgId",
+        label: "PG",
+        placeholder: "Select PG",
+        type: "select",
+        options: pgOptions.map((pg) => ({
+          value: pg.id,
+          label: `${pg.name} - ${pg.location}`,
+        })),
+        variant: "dropdown" as const,
+        searchable: true,
+      },
+      {
+        id: "pgLocation",
+        label: "PG Location",
+        placeholder: "Select PG location",
+        type: "multiSelect",
+        options: pgLocations
+          .filter(pg => pg.location) // Filter out null/undefined PG location values
+          .map((pgLoc) => ({
+            value: pgLoc.location,
+            label: pgLoc.location,
+          })),
+        variant: "dropdown" as const,
+        searchable: true,
+        showSelectAll: true,
+      },
+      {
+        id: "location",
+        label: "Member Location",
+        placeholder: "Select member location",
+        type: "multiSelect",
+        options: locations
+          .filter(l => l.location) // Filter out null/undefined location values
+          .map((location) => ({
+            value: location.location,
+            label: location.location,
+          })),
+        variant: "dropdown" as const,
+        searchable: true,
+        showSelectAll: true,
+      },
+      {
+        id: "work",
+        label: "Work",
+        placeholder: "Select work type",
+        type: "multiSelect",
+        options: workTypes
+          .filter(w => w.work)
+          .map((work) => ({
+            value: work.work,
+            label: work.work,
+          })),
+        variant: "dropdown" as const,
+        searchable: true,
+        showSelectAll: true,
+      },
+      {
+        id: "rentType",
+        label: "Rent Type",
+        placeholder: "Select rent type",
+        type: "select",
+        options: rentTypes.map((rt) => ({
+          value: rt.rentType,
+          label: rt.rentType === "LONG_TERM" ? "Long Term" : "Short Term",
+        })),
+      },
+      {
+        id: "status",
+        label: "Payment Status",
+        placeholder: "Select payment status",
+        type: "select",
+        options: [
+          { value: "PAID", label: "Paid" },
+          { value: "PENDING", label: "Pending" },
+          { value: "OVERDUE", label: "Overdue" },
+        ],
+      },
+    ];
+
+    res.status(200).json({
+      success: true,
+      message: "Dashboard filter options retrieved successfully",
+      data: { 
+        filters, 
+        totalPGs: pgs.length,
+        totalRooms: rooms.length 
+      },
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error("Error getting dashboard filter options:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: "Failed to retrieve dashboard filter options",
     } as ApiResponse<null>);
   }
 };

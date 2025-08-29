@@ -96,12 +96,15 @@ model Payment {
   month                     Int
   year                      Int
   amount                    Float
-  rentBillScreenshot        String
-  electricityBillScreenshot String
-  paidDate                  DateTime
+  dueDate                   DateTime  // When payment is due (1 month from joining date)
+  overdueDate               DateTime  // When payment becomes overdue (dueDate + 5 days)
+  rentBillScreenshot        String?   // Optional initially
+  electricityBillScreenshot String?   // Optional initially
+  paidDate                  DateTime?
 
   attemptNumber Int           @default(1)
-  status        PaymentStatus @default(PENDING)
+  paymentStatus        PaymentStatus @default(PENDING)
+  approvalStatus       ApprovalStatus @default(PENDING)
   approvedBy    String? // Admin ID
   approvedAt    DateTime?
 
@@ -132,6 +135,36 @@ model DashboardStats {
   @@unique([pgId, month, year])
 }
 
+model RegistrationStats {
+  id                     String   @id @default(cuid())
+  month                  Int
+  year                   Int
+  pgType                 PgType   // Track stats by PG type instead of individual PG
+  totalPendingRequests   Int
+  longTermRequests       Int
+  shortTermRequests      Int
+  thisMonthRegistrations Int
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@unique([pgType, month, year])
+}
+
+model PaymentStats {
+  id                           String   @id @default(cuid())
+  month                        Int
+  year                         Int
+  pgType                       PgType   // Track stats by PG type instead of individual PG
+  totalPendingPayments         Int
+  totalAmountPending           Int
+  totalOverduePayments         Int
+  thisMonthPendingPaymentCount Int
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+
+  @@unique([pgType, month, year])
+}
+
 enum Gender {
   MALE
   FEMALE
@@ -145,9 +178,16 @@ enum RegistrationStatus {
 
 enum PaymentStatus {
   PENDING
+  PAID
   APPROVED
   REJECTED
   OVERDUE
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 enum RentType {

@@ -37,3 +37,30 @@ export const paginationQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
   limit: Joi.number().integer().min(1).max(100).default(10),
 });
+
+// Member query validation schema
+export const memberQuerySchema = Joi.object({
+  page: Joi.number().integer().min(1).default(1),
+  limit: Joi.number().integer().min(1).max(100).default(10),
+  search: Joi.string().optional().allow(""),
+  sortBy: Joi.string()
+    .valid(
+      "name",
+      "age",
+      "gender",
+      "location",
+      "email",
+      "phone",
+      "work",
+      "rentType",
+      "advanceAmount",
+      "dateOfJoining",
+    )
+    .optional(),
+  sortOrder: Joi.string().valid("asc", "desc").optional(),
+  paymentStatus: Joi.string().valid("PAID", "PENDING", "OVERDUE").optional(),
+  location: Joi.string().optional(),
+  pgLocation: Joi.string().optional(),
+  work: Joi.string().optional(),
+  rentType: Joi.string().trim().valid("long-term", "short-term").required(),
+});

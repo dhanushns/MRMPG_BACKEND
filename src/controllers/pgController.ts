@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
 import { CreatePGRequest, UpdatePGRequest } from "../types/request";
-import { ApiResponse, PaginatedResponse } from "../types/response";
+import { ApiResponse } from "../types/response";
 
 // Create a new PG
 export const createPG = async (req: Request, res: Response): Promise<void> => {
@@ -99,7 +99,7 @@ export const getAllPGs = async (req: Request, res: Response): Promise<void> => {
         total,
         totalPages,
       },
-    } as PaginatedResponse<typeof pgs[0]>);
+    } as ApiResponse<any>);
   } catch (error) {
     console.error("Error getting PGs:", error);
     res.status(500).json({
