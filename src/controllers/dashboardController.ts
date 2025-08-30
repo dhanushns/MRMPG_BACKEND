@@ -208,6 +208,7 @@ export const calculateAndUpdateDashboardStats = async (
       prisma.payment.count({
         where: {
           pgId: { in: pgIds },
+          paymentStatus: "PAID",
           approvalStatus: "PENDING",
         },
       }),
@@ -447,6 +448,7 @@ export const getDashboardStats = async (
       prisma.payment.count({
         where: {
           pgId: { in: pgIds },
+          paymentStatus: "PAID",
           approvalStatus: "PENDING",
         },
       }),

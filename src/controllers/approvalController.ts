@@ -836,6 +836,11 @@ export const getApprovalStats = async (
       },
     });
 
+    // Get current registration pending count (real-time)
+    const registrationPendingCount = await prisma.registeredMember.count({
+      where: { pgType: admin.pgType },
+    });
+
     // Create payment stats object for formatting
     const paymentStats = [{
       totalPendingPayments: pendingPaymentApprovals,
@@ -868,11 +873,11 @@ export const getApprovalStats = async (
           registration: lastUpdatedRegistration,
           payment: lastUpdatedPayment,
         },
-        filters: {
-          month: requestedMonth,
-          year: requestedYear,
-          pgLocations: pgLocations.length > 0 ? pgLocations : "All locations",
-        }
+        count: {
+          registrationPending: registrationPendingCount,
+          pendingApprovals: pendingPaymentApprovals,
+        },
+        
       },
     } as ApiResponse<any>);
   } catch (error) {
@@ -932,10 +937,10 @@ export const getMembersPaymentData = async (
 
     const pgLocations = parseMultipleValues(req.query.pgLocation as string);
 
-    // Get current month and year for payment status
+    // Get month and year filters (default to current month/year)
     const now = new Date();
-    const currentMonth = now.getMonth() + 1;
-    const currentYear = now.getFullYear();
+    const requestedMonth = parseInt(req.query.month as string) || now.getMonth() + 1;
+    const requestedYear = parseInt(req.query.year as string) || now.getFullYear();
 
     // Get all PGs of admin's type
     const pgs = await prisma.pG.findMany({
@@ -974,6 +979,11 @@ export const getMembersPaymentData = async (
       }
     }
 
+    const requestedMonthEnd = new Date(requestedYear, requestedMonth, 0);
+    whereClause.dateOfJoining = {
+      lte: requestedMonthEnd,
+    };
+
     if (search) {
       whereClause.OR = [
         { name: { contains: search, mode: "insensitive" } },
@@ -1008,20 +1018,8 @@ export const getMembersPaymentData = async (
         },
         payment: {
           where: {
-            OR: [
-              {
-                // Current calendar month payments
-                month: currentMonth,
-                year: currentYear,
-              },
-              {
-                // Payments due around current date (within 30 days)
-                dueDate: {
-                  gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
-                  lte: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000), // 30 days ahead
-                },
-              },
-            ],
+            month: requestedMonth,
+            year: requestedYear,
           },
           select: {
             id: true,
@@ -1051,18 +1049,10 @@ export const getMembersPaymentData = async (
       let calculatedPaymentStatus: "PAID" | "PENDING" | "OVERDUE" = "PENDING";
       let calculatedApprovalStatus: "APPROVED" | "PENDING" | "REJECTED" = "PENDING";
 
+      // Find payment for the exact requested month and year
       const relevantPayment = member.payment.find(
-        (p) => {
-          if (p.month === currentMonth && p.year === currentYear) {
-            return true;
-          }
-          if (p.dueDate) {
-            const daysDiff = Math.abs((now.getTime() - new Date(p.dueDate).getTime()) / (1000 * 60 * 60 * 24));
-            return daysDiff <= 30;
-          }
-          return false;
-        }
-      ) || member.payment[0];
+        (p) => p.month === requestedMonth && p.year === requestedYear
+      );
 
       if (relevantPayment) {
         calculatedApprovalStatus = relevantPayment.approvalStatus as any;
@@ -1073,36 +1063,45 @@ export const getMembersPaymentData = async (
         } else if (relevantPayment.approvalStatus === "REJECTED") {
           calculatedPaymentStatus = "OVERDUE";
         } else {
-          // Check if payment is overdue based on overdueDate
-          if (relevantPayment.overdueDate && now > new Date(relevantPayment.overdueDate)) {
+          // For pending approval status, check if payment is overdue based on the requested month context
+          if (relevantPayment.paymentStatus === "OVERDUE") {
             calculatedPaymentStatus = "OVERDUE";
-          } else if (relevantPayment.dueDate && now > new Date(relevantPayment.dueDate)) {
-            // Past due date but within grace period
-            calculatedPaymentStatus = "PENDING";
+          } else if (relevantPayment.overdueDate) {
+            // Create a date representing the end of the requested month for comparison
+            const endOfRequestedMonth = new Date(requestedYear, requestedMonth, 0); // Last day of requested month
+            if (endOfRequestedMonth > new Date(relevantPayment.overdueDate)) {
+              calculatedPaymentStatus = "OVERDUE";
+            } else {
+              calculatedPaymentStatus = "PENDING";
+            }
           } else {
             calculatedPaymentStatus = "PENDING";
           }
         }
       } else {
-        // No payment record found - check if member should have a payment by now
         const memberJoiningDate = new Date(member.dateOfJoining);
-        const oneMonthAfterJoining = new Date(memberJoiningDate);
-        oneMonthAfterJoining.setMonth(oneMonthAfterJoining.getMonth() + 1);
+        const requestedMonthStart = new Date(requestedYear, requestedMonth - 1, 1);
+        const requestedMonthEnd = new Date(requestedYear, requestedMonth, 0);
         
-        const overdueThreshold = new Date(oneMonthAfterJoining);
-        overdueThreshold.setDate(overdueThreshold.getDate() + 5);
-
-        if (now > overdueThreshold) {
-          calculatedPaymentStatus = "OVERDUE";
-        } else if (now > oneMonthAfterJoining) {
-          calculatedPaymentStatus = "PENDING";
+        const firstPaymentDueDate = new Date(memberJoiningDate);
+        firstPaymentDueDate.setMonth(firstPaymentDueDate.getMonth() + 1);
+        
+        const requestedMonthYear = requestedYear * 12 + (requestedMonth - 1); // Convert to comparable number
+        const firstPaymentMonthYear = firstPaymentDueDate.getFullYear() * 12 + (firstPaymentDueDate.getMonth());
+        
+        if (requestedMonthYear >= firstPaymentMonthYear) {
+          const paymentDueDay = firstPaymentDueDate.getDate();
+          const overdueDate = new Date(requestedYear, requestedMonth - 1, paymentDueDay + 5);
+          
+          if (requestedMonthEnd >= overdueDate) {
+            calculatedPaymentStatus = "OVERDUE";
+          } else {
+            calculatedPaymentStatus = "PENDING";
+          }
         } else {
-          // Member hasn't reached their first payment due date yet
-          calculatedPaymentStatus = "PENDING";
+          calculatedPaymentStatus = "PENDING"; 
         }
       }
-
-      // Flatten the data structure - extract pg and room data to top level
       const { payment, pg, room, ...memberData } = member;
 
       return {
@@ -1111,6 +1110,10 @@ export const getMembersPaymentData = async (
         pgName: pg?.name || "",
         roomNo: room?.roomNo || "",
         rent: room?.rent || 0,
+        requestedMonthPaymentStatus: calculatedPaymentStatus,
+        requestedMonthApprovalStatus: calculatedApprovalStatus,
+        requestedMonthPayment: relevantPayment || null,
+        hasRequestedMonthPayment: !!relevantPayment,
         currentMonthPaymentStatus: calculatedPaymentStatus,
         currentMonthApprovalStatus: calculatedApprovalStatus,
         currentMonthPayment: relevantPayment || null,
@@ -1142,8 +1145,8 @@ export const getMembersPaymentData = async (
         include: {
           payment: {
             where: {
-              month: currentMonth,
-              year: currentYear,
+              month: requestedMonth,
+              year: requestedYear,
             },
             select: {
               paymentStatus: true,
@@ -1159,41 +1162,53 @@ export const getMembersPaymentData = async (
         let memberPaymentStatus: "PAID" | "PENDING" | "OVERDUE" = "PENDING";
         let memberApprovalStatus: "APPROVED" | "PENDING" | "REJECTED" = "PENDING";
 
-        const currentMonthPayment = member.payment.find(
-          (p) => p.month === currentMonth && p.year === currentYear
+        const requestedMonthPayment = member.payment.find(
+          (p) => p.month === requestedMonth && p.year === requestedYear
         );
 
-        if (currentMonthPayment) {
-          memberPaymentStatus = currentMonthPayment.paymentStatus as any;
-          memberApprovalStatus = currentMonthPayment.approvalStatus as any;
+        if (requestedMonthPayment) {
+          memberPaymentStatus = requestedMonthPayment.paymentStatus as any;
+          memberApprovalStatus = requestedMonthPayment.approvalStatus as any;
 
-          if (currentMonthPayment.approvalStatus === "APPROVED") {
+          if (requestedMonthPayment.approvalStatus === "APPROVED") {
             memberPaymentStatus = "PAID";
-          } else if (
-            currentMonthPayment.approvalStatus === "REJECTED" ||
-            currentMonthPayment.paymentStatus === "OVERDUE"
-          ) {
+          } else if (requestedMonthPayment.approvalStatus === "REJECTED") {
             memberPaymentStatus = "OVERDUE";
+          } else {
+            // For pending approval, check if payment became overdue during the requested month
+            if (requestedMonthPayment.paymentStatus === "OVERDUE") {
+              memberPaymentStatus = "OVERDUE";
+            } else {
+              memberPaymentStatus = "PENDING";
+            }
           }
         } else {
+          // No payment record found for the requested month/year
+          // Use the same logical approach as in the main processing
           const memberJoiningDate = new Date(member.dateOfJoining);
-          const currentMonthStart = new Date(currentYear, currentMonth - 1, 1);
-          const currentMonthEnd = new Date(currentYear, currentMonth, 0);
-
-          if (
-            memberJoiningDate >= currentMonthStart &&
-            memberJoiningDate <= currentMonthEnd
-          ) {
-            const overdueDate = new Date(memberJoiningDate);
-            overdueDate.setDate(overdueDate.getDate() + 5);
-            if (now > overdueDate) {
+          const requestedMonthEnd = new Date(requestedYear, requestedMonth, 0);
+          
+          // Calculate when the member's first payment would be due (1 month after joining)
+          const firstPaymentDueDate = new Date(memberJoiningDate);
+          firstPaymentDueDate.setMonth(firstPaymentDueDate.getMonth() + 1);
+          
+          // Check if the requested month is when the member should have made a payment
+          const requestedMonthYear = requestedYear * 12 + (requestedMonth - 1);
+          const firstPaymentMonthYear = firstPaymentDueDate.getFullYear() * 12 + (firstPaymentDueDate.getMonth());
+          
+          if (requestedMonthYear >= firstPaymentMonthYear) {
+            // Member should have had a payment record for this month but doesn't
+            const paymentDueDay = firstPaymentDueDate.getDate();
+            const overdueDate = new Date(requestedYear, requestedMonth - 1, paymentDueDay + 5);
+            
+            if (requestedMonthEnd >= overdueDate) {
               memberPaymentStatus = "OVERDUE";
+            } else {
+              memberPaymentStatus = "PENDING";
             }
-          } else if (memberJoiningDate < currentMonthStart) {
-            const fifthOfMonth = new Date(currentYear, currentMonth - 1, 5);
-            if (now > fifthOfMonth) {
-              memberPaymentStatus = "OVERDUE";
-            }
+          } else {
+            // Member had not yet reached their first payment due date
+            memberPaymentStatus = "PENDING";
           }
         }
 
@@ -1228,11 +1243,19 @@ export const getMembersPaymentData = async (
         total: finalTotal,
         totalPages: Math.ceil(finalTotal / limit),
       },
+      filters: {
+        month: requestedMonth,
+        year: requestedYear,
+        pgLocations: pgLocations.length > 0 ? pgLocations : [],
+        rentType: rentType || null,
+        paymentStatus: paymentStatus || null,
+        approvalStatus: approvalStatus || null,
+      },
     };
 
     res.status(200).json({
       success: true,
-      message: "Members payment data retrieved successfully",
+      message: `Members payment data retrieved successfully for ${requestedMonth}/${requestedYear}`,
       data: response,
     } as ApiResponse<any>);
   } catch (error) {
@@ -1365,10 +1388,10 @@ export const getMembersPaymentFilterOptions = async (
         label: "Rent Type",
         placeholder: "Select rent type",
         type: "select",
-        options: rentTypes.map((rt) => ({
-          value: rt.rentType,
-          label: rt.rentType === "LONG_TERM" ? "Long Term" : "Short Term",
-        })),
+        options: [
+          {value : "LONG_TERM" , label : "Long Term"},
+          {value : "SHORT_TERM" , label : "Short Term"},
+        ],
       },
       {
         id: "paymentStatus",
@@ -1380,6 +1403,7 @@ export const getMembersPaymentFilterOptions = async (
           { value: "PENDING", label: "Pending" },
           { value: "OVERDUE", label: "Overdue" },
         ],
+        defaultValue: "PAID",
       },
       {
         id: "approvalStatus",
@@ -1391,30 +1415,7 @@ export const getMembersPaymentFilterOptions = async (
           { value: "PENDING", label: "Pending" },
           { value: "REJECTED", label: "Rejected" },
         ],
-      },
-      {
-        id: "roomNo",
-        label: "Room Number",
-        placeholder: "Select room number",
-        type: "select",
-        options: await prisma.room.findMany({
-          where: {
-            pGId: { in: pgIds },
-          },
-          select: {
-            id: true,
-            roomNo: true,
-          },
-          distinct: ["roomNo"],
-          orderBy: {
-            roomNo: "asc",
-          },
-        }).then(rooms => 
-          rooms.map(room => ({
-            value: room.roomNo,
-            label: room.roomNo,
-          }))
-        ),
+        defaultValue: "PENDING",
       },
     ];
 

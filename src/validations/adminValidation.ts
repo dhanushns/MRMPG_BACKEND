@@ -63,4 +63,6 @@ export const membersPaymentDataQuerySchema = Joi.object({
   pgLocation: Joi.string().optional().trim(), // Can be comma-separated values
   paymentStatus: Joi.string().valid('PAID', 'PENDING', 'OVERDUE').optional(),
   approvalStatus: Joi.string().valid('APPROVED', 'PENDING', 'REJECTED').optional(),
+  month: Joi.number().integer().min(1).max(12).optional(),
+  year: Joi.number().integer().min(2000).optional(),
 });
