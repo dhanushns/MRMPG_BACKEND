@@ -47,3 +47,34 @@ export interface MemberInfo extends Member {
   room: Room | null;
   paymentStatus: MemberPaymentStatus | null;
 }
+
+// Enquiry response types
+export interface EnquiryResponse {
+  id: string;
+  name: string;
+  phone: string;
+  message: string;
+  status: 'NOT_RESOLVED' | 'RESOLVED';
+  resolvedBy?: string | null;
+  resolvedAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  resolver?: {
+    id: string;
+    name: string;
+    email: string;
+    pgType: string;
+  } | null;
+}
+
+export interface EnquiryStatsCard {
+  title: string;
+  value: string;
+  icon: string;
+  color: string;
+  subtitle: string;
+  badge?: {
+    text: string;
+    color: string;
+  };
+}

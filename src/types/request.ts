@@ -111,3 +111,14 @@ export interface SubmitPaymentRequest {
   pgType: PgType;
   pgLocation: string;
 }
+
+// Enquiry related types
+export interface CreateEnquiryRequest {
+  name: string;
+  phone: string;
+  message: string;
+}
+
+export interface UpdateEnquiryStatusRequest {
+  status: "NOT_RESOLVED" | "RESOLVED";
+}

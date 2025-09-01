@@ -6,6 +6,7 @@ import userRoutes from "./userRoutes";
 import approvalRoutes from "./approvalRoutes";
 import dashboardRoutes from "./dashboardRoutes";
 import memberRoutes from "./memberRoutes";
+import enquiryRoutes from "./enquiryRoutes";
 
 const router = Router();
 
@@ -17,6 +18,7 @@ router.use("/user", userRoutes);
 router.use("/approval", approvalRoutes);
 router.use("/dashboard", dashboardRoutes);
 router.use("/members", memberRoutes);
+router.use("/enquiry", enquiryRoutes);
 
 // Health check endpoint
 router.get("/health", (req, res) => {

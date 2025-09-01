@@ -15,6 +15,27 @@ model Admin {
   pgType    PgType
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Relations
+  resolvedEnquiries Enquiry[] // Enquiries resolved by this admin
+}
+
+model Enquiry {
+  id         String        @id @default(cuid())
+  name       String
+  phone      String
+  message    String        @db.Text
+  status     EnquiryStatus @default(NOT_RESOLVED)
+  resolvedBy String? // Admin ID who resolved the enquiry
+  resolvedAt DateTime? // When the enquiry was resolved
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  // Relation to Admin for resolvedBy
+  resolver Admin? @relation(fields: [resolvedBy], references: [id])
+
+  @@index([status])
+  @@index([createdAt])
 }
 
 model PG {
@@ -96,17 +117,17 @@ model Payment {
   month                     Int
   year                      Int
   amount                    Float
-  dueDate                   DateTime  // When payment is due (1 month from joining date)
-  overdueDate               DateTime  // When payment becomes overdue (dueDate + 5 days)
-  rentBillScreenshot        String?   // Optional initially
-  electricityBillScreenshot String?   // Optional initially
+  dueDate                   DateTime // When payment is due (1 month from joining date)
+  overdueDate               DateTime // When payment becomes overdue (dueDate + 5 days)
+  rentBillScreenshot        String? // Optional initially
+  electricityBillScreenshot String? // Optional initially
   paidDate                  DateTime?
 
-  attemptNumber Int           @default(1)
-  paymentStatus        PaymentStatus @default(PENDING)
-  approvalStatus       ApprovalStatus @default(PENDING)
-  approvedBy    String? // Admin ID
-  approvedAt    DateTime?
+  attemptNumber  Int            @default(1)
+  paymentStatus  PaymentStatus  @default(PENDING)
+  approvalStatus ApprovalStatus @default(PENDING)
+  approvedBy     String? // Admin ID
+  approvedAt     DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -139,7 +160,7 @@ model RegistrationStats {
   id                     String   @id @default(cuid())
   month                  Int
   year                   Int
-  pgType                 PgType   // Track stats by PG type instead of individual PG
+  pgType                 PgType // Track stats by PG type instead of individual PG
   totalPendingRequests   Int
   longTermRequests       Int
   shortTermRequests      Int
@@ -154,7 +175,7 @@ model PaymentStats {
   id                           String   @id @default(cuid())
   month                        Int
   year                         Int
-  pgType                       PgType   // Track stats by PG type instead of individual PG
+  pgType                       PgType // Track stats by PG type instead of individual PG
   totalPendingPayments         Int
   totalAmountPending           Int
   totalOverduePayments         Int
@@ -198,4 +219,9 @@ enum RentType {
 enum PgType {
   WOMENS
   MENS
+}
+
+enum EnquiryStatus {
+  NOT_RESOLVED
+  RESOLVED
 }

@@ -15,6 +15,7 @@ import {
   createRoomSchema,
   updateRoomSchema,
   pgIdParamSchema,
+  roomIdParamSchema,
   pgIdAndRoomIdParamSchema,
   locationParamSchema,
   roomFilterQuerySchema,
@@ -36,20 +37,23 @@ router.get("/filters", getRoomFilterOptions);
 router.get("/stats", getRoomStats);
 router.get("/:pgId/stats", validateParams(pgIdParamSchema), getRoomStats);
 
+// GET all rooms - defaults to first PG if no pgId provided
+router.get("/", validateQuery(roomFilterQuerySchema), getRooms);
+
 // GET /rooms/:pgId - Get all rooms of a specific PG
 router.get("/:pgId", validateParams(pgIdParamSchema), validateQuery(roomFilterQuerySchema), getRooms);
 
-// GET /rooms/:pgId/:roomId - Get a specific room by ID
-router.get("/:pgId/:roomId", validateParams(pgIdAndRoomIdParamSchema), getRoomById);
+// GET /rooms/:roomId - Get a specific room by ID
+router.get("/:roomId", validateParams(roomIdParamSchema), getRoomById);
 
 // POST /rooms/:pgId - Create a new room in a specific PG
 router.post("/:pgId", validateParams(pgIdParamSchema), validateBody(createRoomSchema), createRoom);
 
-// PUT /rooms/:pgId/:roomId - Update a specific room
-router.put("/:pgId/:roomId", validateParams(pgIdAndRoomIdParamSchema), validateBody(updateRoomSchema), updateRoom);
+// PUT /rooms/:roomId - Update a specific room
+router.put("/:roomId", validateParams(roomIdParamSchema), validateBody(updateRoomSchema), updateRoom);
 
-// DELETE /rooms/:pgId/:roomId - Delete a specific room
-router.delete("/:pgId/:roomId", validateParams(pgIdAndRoomIdParamSchema), deleteRoom);
+// DELETE /rooms/:roomId - Delete a specific room
+router.delete("/:roomId", validateParams(roomIdParamSchema), deleteRoom);
 
 
 export default router;

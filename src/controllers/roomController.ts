@@ -4,7 +4,7 @@ import { ApiResponse } from "../types/response";
 import { CreateRoomRequest, UpdateRoomRequest } from "../types/request";
 import { AuthenticatedRequest } from "../middlewares/auth";
 
-// GET all rooms of a specific PG
+// GET all rooms - by default selects first PG in ascending order, with optional occupancy filtering
 export const getRooms = async (
   req: AuthenticatedRequest,
   res: Response
@@ -18,15 +18,13 @@ export const getRooms = async (
       return;
     }
 
-    const { pgId } = req.params;
+    let { pgId } = req.params;
+    const { occupancyStatus, page = 1, limit = 10 } = req.query;
 
-    if (!pgId) {
-      res.status(400).json({
-        success: false,
-        message: "PG ID is required",
-      } as ApiResponse<null>);
-      return;
-    }
+    // Parse pagination parameters
+    const pageNumber = parseInt(page as string, 10) || 1;
+    const pageSize = parseInt(limit as string, 10) || 10;
+    const skip = (pageNumber - 1) * pageSize;
 
     // Get admin details to verify pgType
     const admin = await prisma.admin.findUnique({
@@ -42,25 +40,57 @@ export const getRooms = async (
       return;
     }
 
-    // Verify PG exists and matches admin's PG type
-    const pg = await prisma.pG.findUnique({
-      where: { id: pgId },
-    });
+    let pg;
+    
+    // If pgId is provided, verify it exists and matches admin's PG type
+    if (pgId) {
+      pg = await prisma.pG.findUnique({
+        where: { id: pgId },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          location: true,
+        },
+      });
 
-    if (!pg) {
-      res.status(404).json({
-        success: false,
-        message: "PG not found",
-      } as ApiResponse<null>);
-      return;
-    }
+      if (!pg) {
+        res.status(404).json({
+          success: false,
+          message: "PG not found",
+        } as ApiResponse<null>);
+        return;
+      }
 
-    if (pg.type !== admin.pgType) {
-      res.status(403).json({
-        success: false,
-        message: "You can only manage rooms of your PG type",
-      } as ApiResponse<null>);
-      return;
+      if (pg.type !== admin.pgType) {
+        res.status(403).json({
+          success: false,
+          message: "You can only manage rooms of your PG type",
+        } as ApiResponse<null>);
+        return;
+      }
+    } else {
+      // If no pgId provided, select the first PG of admin's type in ascending order
+      pg = await prisma.pG.findFirst({
+        where: { type: admin.pgType },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          location: true,
+        },
+        orderBy: { location: "asc" },
+      });
+
+      if (!pg) {
+        res.status(404).json({
+          success: false,
+          message: "No PG found for your PG type",
+        } as ApiResponse<null>);
+        return;
+      }
+      
+      pgId = pg.id;
     }
 
     // Get all rooms for this PG with member count
@@ -87,18 +117,72 @@ export const getRooms = async (
       },
     });
 
-    // Transform data to include occupancy info
-    const roomsWithOccupancy = rooms.map((room) => ({
-      ...room,
-      currentOccupancy: room._count.members,
-      availableSlots: room.capacity - room._count.members,
-      isFullyOccupied: room._count.members >= room.capacity,
-    }));
+    // Helper function to determine occupancy status
+    const getOccupancyStatus = (currentOccupancy: number, capacity: number): string => {
+      if (currentOccupancy === 0) return "FULLY_VACANT";
+      if (currentOccupancy >= capacity) return "FULLY_OCCUPIED";
+      return "PARTIALLY_OCCUPIED";
+    };
+
+    // Helper function to get occupancy status label
+    const getOccupancyStatusLabel = (status: string): string => {
+      switch (status) {
+        case "FULLY_VACANT": return "Fully Vacant";
+        case "PARTIALLY_OCCUPIED": return "Partially Occupied";
+        case "FULLY_OCCUPIED": return "Fully Occupied";
+        default: return "Unknown";
+      }
+    };
+
+    // Transform data to include occupancy info and format as requested
+    let roomsWithOccupancy = rooms.map((room) => {
+      const currentOccupancy = room._count.members;
+      const capacity = room.capacity;
+      const occupancyStatusValue = getOccupancyStatus(currentOccupancy, capacity);
+      
+      return {
+        id: room.id,
+        roomNo: room.roomNo,
+        occupied: currentOccupancy,
+        status: getOccupancyStatusLabel(occupancyStatusValue),
+        statusValue: occupancyStatusValue,
+        rentAmount: room.rent,
+        capacity: capacity,
+        currentOccupancy: currentOccupancy,
+        availableSlots: capacity - currentOccupancy,
+        isFullyOccupied: currentOccupancy >= capacity,
+        members: room.members,
+      };
+    });
+
+    // Filter by occupancy status if provided
+    if (occupancyStatus && typeof occupancyStatus === 'string') {
+      const filterStatus = occupancyStatus.toUpperCase();
+      if (['FULLY_VACANT', 'PARTIALLY_OCCUPIED', 'FULLY_OCCUPIED'].includes(filterStatus)) {
+        roomsWithOccupancy = roomsWithOccupancy.filter(room => room.statusValue === filterStatus);
+      }
+    }
+
+    // Calculate total count after filtering
+    const totalCount = roomsWithOccupancy.length;
+    const totalPages = Math.ceil(totalCount / pageSize);
+    
+    // Apply pagination
+    const paginatedRooms = roomsWithOccupancy.slice(skip, skip + pageSize);
 
     res.status(200).json({
       success: true,
       message: "Rooms retrieved successfully",
-      data: roomsWithOccupancy,
+      data: {
+        rooms: paginatedRooms,
+        pgDetails: pg,
+        pagination: {
+          page: pageNumber,
+          limit: pageSize,
+          total: totalCount,
+          totalPages,
+        },
+      },
     } as ApiResponse<any>);
   } catch (error) {
     console.error("Error getting rooms:", error);
@@ -124,12 +208,12 @@ export const getRoomById = async (
       return;
     }
 
-    const { pgId, roomId } = req.params;
+    const { roomId } = req.params;
 
-    if (!pgId || !roomId) {
+    if (!roomId) {
       res.status(400).json({
         success: false,
-        message: "PG ID and Room ID are required",
+        message: "Room ID is required",
       } as ApiResponse<null>);
       return;
     }
@@ -148,32 +232,13 @@ export const getRoomById = async (
       return;
     }
 
-    // Verify PG exists and matches admin's PG type
-    const pg = await prisma.pG.findUnique({
-      where: { id: pgId },
-    });
-
-    if (!pg) {
-      res.status(404).json({
-        success: false,
-        message: "PG not found",
-      } as ApiResponse<null>);
-      return;
-    }
-
-    if (pg.type !== admin.pgType) {
-      res.status(403).json({
-        success: false,
-        message: "You can only access rooms of your PG type",
-      } as ApiResponse<null>);
-      return;
-    }
-
-    // Get room with detailed member information
+    // Get room with detailed member information and verify PG ownership
     const room = await prisma.room.findFirst({
       where: {
         id: roomId,
-        pGId: pgId,
+        PG: {
+          type: admin.pgType,
+        },
       },
       include: {
         members: {
@@ -210,7 +275,7 @@ export const getRoomById = async (
     if (!room) {
       res.status(404).json({
         success: false,
-        message: "Room not found",
+        message: "Room not found or you don't have permission to access it",
       } as ApiResponse<null>);
       return;
     }
@@ -376,13 +441,13 @@ export const updateRoom = async (
       return;
     }
 
-    const { pgId, roomId } = req.params;
+    const { roomId } = req.params;
     const { roomNo, rent, capacity }: UpdateRoomRequest = req.body;
 
-    if (!pgId || !roomId) {
+    if (!roomId) {
       res.status(400).json({
         success: false,
-        message: "PG ID and Room ID are required",
+        message: "Room ID is required",
       } as ApiResponse<null>);
       return;
     }
@@ -410,34 +475,21 @@ export const updateRoom = async (
       return;
     }
 
-    // Verify PG exists and matches admin's PG type
-    const pg = await prisma.pG.findUnique({
-      where: { id: pgId },
-    });
-
-    if (!pg) {
-      res.status(404).json({
-        success: false,
-        message: "PG not found",
-      } as ApiResponse<null>);
-      return;
-    }
-
-    if (pg.type !== admin.pgType) {
-      res.status(403).json({
-        success: false,
-        message: "You can only update rooms of your PG type",
-      } as ApiResponse<null>);
-      return;
-    }
-
-    // Check if room exists in this PG
+    // Check if room exists and verify PG ownership
     const existingRoom = await prisma.room.findFirst({
       where: {
         id: roomId,
-        pGId: pgId,
+        PG: {
+          type: admin.pgType,
+        },
       },
       include: {
+        PG: {
+          select: {
+            id: true,
+            type: true,
+          },
+        },
         _count: {
           select: {
             members: true,
@@ -449,7 +501,7 @@ export const updateRoom = async (
     if (!existingRoom) {
       res.status(404).json({
         success: false,
-        message: "Room not found",
+        message: "Room not found or you don't have permission to update it",
       } as ApiResponse<null>);
       return;
     }
@@ -463,12 +515,12 @@ export const updateRoom = async (
       return;
     }
 
-    // If updating room number, check if it already exists in this PG
+    // If updating room number, check if it already exists in the same PG
     if (roomNo && roomNo !== existingRoom.roomNo) {
       const roomWithSameNumber = await prisma.room.findFirst({
         where: {
           roomNo,
-          pGId: pgId,
+          pGId: existingRoom.pGId,
           id: { not: roomId },
         },
       });
@@ -553,12 +605,12 @@ export const deleteRoom = async (
       return;
     }
 
-    const { pgId, roomId } = req.params;
+    const { roomId } = req.params;
 
-    if (!pgId || !roomId) {
+    if (!roomId) {
       res.status(400).json({
         success: false,
-        message: "PG ID and Room ID are required",
+        message: "Room ID is required",
       } as ApiResponse<null>);
       return;
     }
@@ -577,32 +629,13 @@ export const deleteRoom = async (
       return;
     }
 
-    // Verify PG exists and matches admin's PG type
-    const pg = await prisma.pG.findUnique({
-      where: { id: pgId },
-    });
-
-    if (!pg) {
-      res.status(404).json({
-        success: false,
-        message: "PG not found",
-      } as ApiResponse<null>);
-      return;
-    }
-
-    if (pg.type !== admin.pgType) {
-      res.status(403).json({
-        success: false,
-        message: "You can only delete rooms of your PG type",
-      } as ApiResponse<null>);
-      return;
-    }
-
-    // Check if room exists and has no members
+    // Check if room exists and verify PG ownership
     const room = await prisma.room.findFirst({
       where: {
         id: roomId,
-        pGId: pgId,
+        PG: {
+          type: admin.pgType,
+        },
       },
       include: {
         _count: {
@@ -616,7 +649,7 @@ export const deleteRoom = async (
     if (!room) {
       res.status(404).json({
         success: false,
-        message: "Room not found",
+        message: "Room not found or you don't have permission to delete it",
       } as ApiResponse<null>);
       return;
     }

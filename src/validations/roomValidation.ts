@@ -5,6 +5,7 @@ export const createRoomSchema = Joi.object({
   roomNo: Joi.string().required().min(1).max(10).trim(),
   rent: Joi.number().required().min(0).max(999999),
   capacity: Joi.number().integer().required().min(1).max(20),
+  pgLocation: Joi.string().optional()
 });
 
 // Room update validation schema
@@ -12,7 +13,7 @@ export const updateRoomSchema = Joi.object({
   roomNo: Joi.string().optional().min(1).max(10).trim(),
   rent: Joi.number().optional().min(0).max(999999),
   capacity: Joi.number().integer().optional().min(1).max(20),
-}).min(1); // At least one field must be provided
+}).min(1);
 
 // Common validation schemas
 export const idParamSchema = Joi.object({
@@ -21,6 +22,10 @@ export const idParamSchema = Joi.object({
 
 export const pgIdParamSchema = Joi.object({
   pgId: Joi.string().required(),
+});
+
+export const roomIdParamSchema = Joi.object({
+  roomId: Joi.string().required(),
 });
 
 export const pgIdAndRoomIdParamSchema = Joi.object({
@@ -41,11 +46,7 @@ export const paginationQuerySchema = Joi.object({
 export const roomFilterQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
   limit: Joi.number().integer().min(1).max(100).default(10),
-  occupancyStatus: Joi.string().valid('fully_occupied', 'vacant', 'partially_occupied').optional(),
-  minRent: Joi.number().min(0).optional(),
-  maxRent: Joi.number().min(0).optional(),
-  minCapacity: Joi.number().integer().min(1).optional(),
-  maxCapacity: Joi.number().integer().min(1).max(20).optional(),
+  occupancyStatus: Joi.string().valid('FULLY_VACANT', 'PARTIALLY_OCCUPIED', 'FULLY_OCCUPIED').optional(),
 }).custom((value, helpers) => {
   // Validate rent range
   if (value.minRent && value.maxRent && value.minRent > value.maxRent) {
