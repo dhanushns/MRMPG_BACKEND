@@ -489,7 +489,7 @@ export const getMemberFilterOptions = async (
         placeholder: "Select work type",
         type: "multiSelect",
         options: workTypes
-          .filter(w => w.work)
+          .filter(w => w.work) 
           .map((work) => ({
             value: work.work,
             label: work.work,
@@ -556,6 +556,243 @@ export const getMemberFilterOptions = async (
       success: false,
       message: "Internal server error",
       error: "Failed to retrieve member filter options",
+    } as ApiResponse<null>);
+  }
+};
+
+// Get detailed member information including payment history
+export const getMemberDetails = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Get admin details to know their pgType
+    const admin = await prisma.admin.findUnique({
+      where: { id: req.admin.id },
+      select: { pgType: true },
+    });
+
+    if (!admin) {
+      res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const { memberId } = req.params;
+
+    // Get pagination parameters for payment history
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const offset = (page - 1) * limit;
+
+    // Find the member with all related data
+    const member = await prisma.member.findUnique({
+      where: { id: memberId },
+      include: {
+        pg: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            location: true,
+          },
+        },
+        room: {
+          select: {
+            id: true,
+            roomNo: true,
+            rent: true,
+            capacity: true,
+          },
+        },
+      },
+    });
+
+    if (!member) {
+      res.status(404).json({
+        success: false,
+        message: "Member not found",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Verify admin can access this member (same pgType)
+    if (member.pg.type !== admin.pgType) {
+      res.status(403).json({
+        success: false,
+        message: "You can only access members of your PG type",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Calculate tenure
+    const now = new Date();
+    const joiningDate = new Date(member.dateOfJoining);
+    const diffTime = Math.abs(now.getTime() - joiningDate.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    const years = Math.floor(diffDays / 365);
+    const months = Math.floor((diffDays % 365) / 30);
+    const days = diffDays % 30;
+
+    // Get payment history with pagination
+    const [paymentHistory, totalPayments] = await Promise.all([
+      prisma.payment.findMany({
+        where: { memberId: member.id },
+        skip: offset,
+        take: limit,
+        orderBy: {
+          createdAt: "desc",
+        },
+      }),
+      prisma.payment.count({
+        where: { memberId: member.id },
+      }),
+    ]);
+
+    // Calculate payment summary
+    const [
+      pendingPaymentsCount,
+      overduePaymentsCount,
+      totalAmountPaidResult,
+      totalAmountPendingResult,
+      totalAmountOverdueResult,
+      lastPayment,
+    ] = await Promise.all([
+      prisma.payment.count({
+        where: {
+          memberId: member.id,
+          approvalStatus: "PENDING",
+        },
+      }),
+      prisma.payment.count({
+        where: {
+          memberId: member.id,
+          paymentStatus: "OVERDUE",
+        },
+      }),
+      prisma.payment.aggregate({
+        where: {
+          memberId: member.id,
+          approvalStatus: "APPROVED",
+        },
+        _sum: { amount: true },
+      }),
+      prisma.payment.aggregate({
+        where: {
+          memberId: member.id,
+          approvalStatus: "PENDING",
+        },
+        _sum: { amount: true },
+      }),
+      prisma.payment.aggregate({
+        where: {
+          memberId: member.id,
+          paymentStatus: "OVERDUE",
+        },
+        _sum: { amount: true },
+      }),
+      prisma.payment.findFirst({
+        where: {
+          memberId: member.id,
+          approvalStatus: "APPROVED",
+        },
+        orderBy: {
+          paidDate: "desc",
+        },
+        select: {
+          paidDate: true,
+        },
+      }),
+    ]);
+
+    // Calculate next due date based on member's joining date and current date
+    const memberJoiningDate = new Date(member.dateOfJoining);
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+    
+    // Check if there's a payment record for current month
+    const currentMonthPayment = await prisma.payment.findFirst({
+      where: {
+        memberId: member.id,
+        month: currentMonth,
+        year: currentYear,
+      },
+    });
+
+    let nextDueDate: Date | null = null;
+    if (!currentMonthPayment || currentMonthPayment.approvalStatus !== "APPROVED") {
+      // If no payment for current month or not approved, next due date is this month's due date
+      const paymentDueDay = memberJoiningDate.getDate();
+      nextDueDate = new Date(currentYear, currentMonth - 1, paymentDueDay);
+      
+      // If this month's due date has passed, calculate next month's due date
+      if (nextDueDate < now && currentMonthPayment?.approvalStatus === "APPROVED") {
+        nextDueDate = new Date(currentYear, currentMonth, paymentDueDay);
+      }
+    } else {
+      // Current month is paid, calculate next month's due date
+      const paymentDueDay = memberJoiningDate.getDate();
+      nextDueDate = new Date(currentYear, currentMonth, paymentDueDay);
+    }
+
+    // Format member data
+    const { pg, room, ...memberData } = member;
+    const formattedMember = {
+      ...memberData,
+      pgDetails: pg,
+      roomDetails: room,
+      tenure: {
+        days,
+        months,
+        years,
+      },
+    };
+
+    const paymentSummary = {
+      totalPayments,
+      pendingPayments: pendingPaymentsCount,
+      overduePayments: overduePaymentsCount,
+      totalAmountPaid: totalAmountPaidResult._sum?.amount || 0,
+      totalAmountPending: totalAmountPendingResult._sum?.amount || 0,
+      totalAmountOverdue: totalAmountOverdueResult._sum?.amount || 0,
+      lastPaymentDate: lastPayment?.paidDate || null,
+      nextDueDate,
+    };
+
+    res.status(200).json({
+      success: true,
+      message: "Member details retrieved successfully",
+      data: {
+        member: formattedMember,
+        paymentHistory: {
+          data: paymentHistory,
+          pagination: {
+            page,
+            limit,
+            total: totalPayments,
+            totalPages: Math.ceil(totalPayments / limit),
+          },
+        },
+        paymentSummary,
+      },
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error("Error getting member details:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: "Failed to retrieve member details",
     } as ApiResponse<null>);
   }
 };

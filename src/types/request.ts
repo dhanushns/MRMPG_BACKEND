@@ -97,3 +97,17 @@ export interface ApproveRejectMemberRequest {
   advanceAmount?: number;
   dateOfJoining?: string; // ISO date string
 }
+
+// Payment approval types
+export interface ApproveRejectPaymentRequest {
+  approvalStatus: 'APPROVED' | 'REJECTED';
+}
+
+// Payment related types
+export interface SubmitPaymentRequest {
+  name: string;
+  memberId: string;
+  roomNo: string;
+  pgType: PgType;
+  pgLocation: string;
+}

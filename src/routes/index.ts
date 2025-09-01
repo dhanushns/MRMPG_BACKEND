@@ -2,7 +2,7 @@ import { Router } from "express";
 import pgRoutes from "./pgRoutes";
 import adminRoutes from "./adminRoutes";
 import roomRoutes from "./roomRoutes";
-import registrationRoutes from "./registrationRoutes";
+import userRoutes from "./userRoutes";
 import approvalRoutes from "./approvalRoutes";
 import dashboardRoutes from "./dashboardRoutes";
 import memberRoutes from "./memberRoutes";
@@ -13,10 +13,10 @@ const router = Router();
 router.use("/pg", pgRoutes);
 router.use("/admin", adminRoutes);
 router.use("/rooms", roomRoutes);
-router.use("/registration", registrationRoutes);
+router.use("/user", userRoutes);
 router.use("/approval", approvalRoutes);
 router.use("/dashboard", dashboardRoutes);
-router.use("/", memberRoutes);
+router.use("/members", memberRoutes);
 
 // Health check endpoint
 router.get("/health", (req, res) => {

@@ -62,3 +62,9 @@ export const roomFilterQuerySchema = Joi.object({
   'custom.rentRange': 'minRent cannot be greater than maxRent',
   'custom.capacityRange': 'minCapacity cannot be greater than maxCapacity',
 });
+
+
+export const roomFilterParamsSchema = Joi.object({
+  location: Joi.string().optional(),
+  occupancyStatus: Joi.string().valid('FULLY_VACANT', 'PARTIALLY_OCCUPIED', 'FULLY_OCCUPIED').optional(),
+});

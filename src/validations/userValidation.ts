@@ -25,6 +25,15 @@ export const completeRegistrationSchema = Joi.object({
   pgType: Joi.string().valid(...Object.values(PgType)).required(),
 });
 
+// Payment submission validation schema
+export const submitPaymentSchema = Joi.object({
+  name: Joi.string().required().min(2).max(100).trim(),
+  memberId: Joi.string().required().min(3).max(50).trim(),
+  roomNo: Joi.string().required().min(1).max(10).trim(),
+  pgType: Joi.string().valid(...Object.values(PgType)).required(),
+  pgLocation: Joi.string().required().min(2).max(200).trim(),
+});
+
 // Common validation schemas
 export const idParamSchema = Joi.object({
   id: Joi.string().required(),
