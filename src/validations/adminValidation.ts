@@ -47,7 +47,7 @@ export const approveRejectMemberSchema = Joi.object({
     then: Joi.string().required(),
     otherwise: Joi.string().optional(),
   }),
-  roomNo: Joi.string().optional(),
+  roomId: Joi.string().optional(),
   rentAmount: Joi.number().positive().optional(),
   advanceAmount: Joi.number().min(0).optional(),
   dateOfJoining: Joi.date().iso().optional(),

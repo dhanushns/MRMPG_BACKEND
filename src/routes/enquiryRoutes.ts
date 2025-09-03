@@ -8,10 +8,10 @@ import {
   updateEnquiryStatus,
   getEnquiryStats,
   deleteEnquiry,
+  getEnquiryFilterOptions,
 } from "../controllers/enquiryController";
 import {
   createEnquirySchema,
-  updateEnquiryStatusSchema,
   enquiryIdParamSchema,
   enquiryFilterQuerySchema,
 } from "../validations/enquiryValidation";
@@ -19,7 +19,6 @@ import {
 const router = express.Router();
 
 // PUBLIC ROUTES (no authentication required)
-// POST /api/enquiry - Create new enquiry
 router.post(
   "/",
   validateBody(createEnquirySchema),
@@ -27,7 +26,6 @@ router.post(
 );
 
 // ADMIN ROUTES (authentication required)
-// GET /api/enquiry - Get all enquiries with filters and pagination
 router.get(
   "/",
   authenticateAdmin,
@@ -35,14 +33,18 @@ router.get(
   getEnquiries
 );
 
-// GET /api/enquiry/stats - Get enquiry statistics
 router.get(
   "/stats",
   authenticateAdmin,
   getEnquiryStats
 );
 
-// GET /api/enquiry/:enquiryId - Get single enquiry by ID
+router.get(
+  "/filters",
+  authenticateAdmin,
+  getEnquiryFilterOptions
+);
+
 router.get(
   "/:enquiryId",
   authenticateAdmin,
@@ -50,16 +52,13 @@ router.get(
   getEnquiryById
 );
 
-// PATCH /api/enquiry/:enquiryId/status - Update enquiry status
 router.patch(
-  "/:enquiryId/status",
+  "/:enquiryId/resolve",
   authenticateAdmin,
   validateParams(enquiryIdParamSchema),
-  validateBody(updateEnquiryStatusSchema),
   updateEnquiryStatus
 );
 
-// DELETE /api/enquiry/:enquiryId - Delete enquiry
 router.delete(
   "/:enquiryId",
   authenticateAdmin,

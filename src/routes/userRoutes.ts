@@ -4,6 +4,8 @@ import {
   validatePersonalData,
   completeRegistration,
   submitPayment,
+  getPgLocationOptions,
+  getRoomsByPgId,
 } from "../controllers/userController";
 import { validateBody, validateParams, validateQuery } from "../middlewares/validation";
 import {
@@ -65,6 +67,11 @@ const paymentUpload = multer({
 
 // Public routes for member registration
 
+// Get PG location options for registration form
+router.get("/pg-locations", getPgLocationOptions);
+
+// Get rooms by PG ID for registration form
+router.get("/rooms", getRoomsByPgId);
 
 router.post("/validate", 
   validateBody(validatePersonalDataSchema), 

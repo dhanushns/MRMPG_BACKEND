@@ -92,7 +92,7 @@ export interface GetMembersFilterRequest {
 export interface ApproveRejectMemberRequest {
   status: 'APPROVED' | 'REJECTED';
   pgId?: string;
-  roomNo?: string;
+  roomId?: string;
   rentAmount?: number;
   advanceAmount?: number;
   dateOfJoining?: string; // ISO date string
@@ -107,9 +107,8 @@ export interface ApproveRejectPaymentRequest {
 export interface SubmitPaymentRequest {
   name: string;
   memberId: string;
-  roomNo: string;
-  pgType: PgType;
-  pgLocation: string;
+  roomId: string;
+  pgId: string;
 }
 
 // Enquiry related types

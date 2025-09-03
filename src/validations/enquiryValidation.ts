@@ -10,11 +10,6 @@ export const createEnquirySchema = Joi.object({
   message: Joi.string().required().min(10).max(1000).trim(),
 });
 
-// Update enquiry status validation schema (admin only)
-export const updateEnquiryStatusSchema = Joi.object({
-  status: Joi.string().valid("NOT_RESOLVED", "RESOLVED").required(),
-});
-
 // Enquiry ID parameter validation
 export const enquiryIdParamSchema = Joi.object({
   enquiryId: Joi.string().required(),
@@ -26,6 +21,8 @@ export const enquiryFilterQuerySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(10),
   status: Joi.string().valid("NOT_RESOLVED", "RESOLVED").optional(),
   search: Joi.string().min(1).max(100).optional().trim(),
-  sortBy: Joi.string().valid("createdAt", "updatedAt", "name").default("createdAt"),
+  sortBy: Joi.string().valid("createdAt", "updatedAt", "name", "status").default("createdAt"),
   sortOrder: Joi.string().valid("asc", "desc").default("desc"),
+  resolvedBy: Joi.string().optional(),
+  dateRange: Joi.string().valid("7", "30", "90", "180", "365", "all").optional(),
 });

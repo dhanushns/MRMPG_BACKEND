@@ -5,6 +5,9 @@ import { ApiResponse, AdminResponse, AdminLoginResponse } from "../types/respons
 import { hashPassword, comparePassword, generateAdminToken } from "../utils/auth";
 import { AuthenticatedRequest } from "../middlewares/auth";
 import { ENV } from "../config/env";
+import { 
+  updateOverduePayments,
+} from "../utils/paymentRecordManager";
 
 // Admin login
 export const loginAdmin = async (req: Request, res: Response): Promise<void> => {
@@ -280,6 +283,38 @@ export const getManagedPGs = async (req: AuthenticatedRequest, res: Response): P
       success: false,
       message: "Internal server error",
       error: "Failed to retrieve managed PGs",
+    } as ApiResponse<null>);
+  }
+};
+
+// Update overdue payment statuses
+export const updateOverduePaymentsEndpoint = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const result = await updateOverduePayments();
+
+    res.status(200).json({
+      success: true,
+      message: "Overdue payments updated successfully",
+      data: result,
+    } as ApiResponse<any>);
+
+  } catch (error) {
+    console.error("Error updating overdue payments:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error", 
+      error: "Failed to update overdue payments",
     } as ApiResponse<null>);
   }
 };

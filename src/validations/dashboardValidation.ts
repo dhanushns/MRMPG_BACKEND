@@ -12,4 +12,14 @@ export const getAllMembersQuerySchema = Joi.object({
   paymentStatus: Joi.string().valid('PAID', 'PENDING', 'OVERDUE').optional(),
   status: Joi.string().valid('PAID', 'PENDING', 'OVERDUE').optional(), // Alias for paymentStatus
   search: Joi.string().optional().trim(),
+  sortBy: Joi.string().valid(
+    'name', 'memberId', 'dateOfJoining', 'createdAt', 'age', 
+    'rentAmount', 'pgName', 'pgLocation', 'roomNo', 'location', 'work'
+  ).optional().default('createdAt'),
+  sortOrder: Joi.string().valid('asc', 'desc').optional().default('desc'),
+});
+
+// Dashboard filter options query validation schema
+export const getDashboardFilterOptionsQuerySchema = Joi.object({
+  pgLocation: Joi.string().optional().trim(), // For cascading room filter
 });

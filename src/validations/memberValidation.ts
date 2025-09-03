@@ -45,22 +45,15 @@ export const memberQuerySchema = Joi.object({
   search: Joi.string().optional().allow(""),
   sortBy: Joi.string()
     .valid(
-      "name",
-      "age",
-      "gender",
-      "location",
-      "email",
-      "phone",
-      "work",
-      "rentType",
-      "advanceAmount",
-      "dateOfJoining",
+      "createdAt", "name", "memberId", "dateOfJoining", "age", 
+      "location", "work", "pgName", "pgLocation", "roomNo", "rentAmount",
+      "gender", "email", "phone", "rentType", "advanceAmount"
     )
-    .optional(),
-  sortOrder: Joi.string().valid("asc", "desc").optional(),
+    .default("createdAt"),
+  sortOrder: Joi.string().valid("asc", "desc").default("desc"),
   paymentStatus: Joi.string().valid("PAID", "PENDING", "OVERDUE").optional(),
-  location: Joi.string().optional(),
-  pgLocation: Joi.string().optional(),
-  work: Joi.string().optional(),
+  location: Joi.string().optional().allow(""),
+  pgLocation: Joi.string().optional().allow(""),
+  work: Joi.string().optional().allow(""),
   rentType: Joi.string().trim().valid("long-term", "short-term").required(),
 });

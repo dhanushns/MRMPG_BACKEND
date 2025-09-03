@@ -10,8 +10,8 @@ import {
 } from "../controllers/approvalController";
 import { authenticateAdmin, authorizeAdmin } from "../middlewares/auth";
 import { validateQuery, validateBody, validateParams } from "../middlewares/validation";
-import { registeredMembersQuerySchema, approveRejectMemberSchema, idParamSchema, membersPaymentDataQuerySchema } from "../validations/adminValidation";
-import { approveRejectPaymentSchema, paymentIdParamSchema } from "../validations/approvalValidation";
+import { registeredMembersQuerySchema, approveRejectMemberSchema, idParamSchema } from "../validations/adminValidation";
+import { approveRejectPaymentSchema, paymentIdParamSchema, memberPaymentQuerySchema } from "../validations/approvalValidation";
 
 const router = Router();
 
@@ -27,7 +27,7 @@ router.get("/members", validateQuery(registeredMembersQuerySchema), getRegistere
 router.put("/members/:id", validateParams(idParamSchema), validateBody(approveRejectMemberSchema), approveOrRejectMember);
 
 // Members payment data routes
-router.get("/payments", validateQuery(membersPaymentDataQuerySchema), getMembersPaymentData);
+router.get("/payments", validateQuery(memberPaymentQuerySchema), getMembersPaymentData);
 router.get("/payments/filters", getMembersPaymentFilterOptions);
 router.put("/payments/:paymentId", validateParams(paymentIdParamSchema), validateBody(approveRejectPaymentSchema), approveOrRejectPayment);
 

@@ -31,7 +31,6 @@ model Enquiry {
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
 
-  // Relation to Admin for resolvedBy
   resolver Admin? @relation(fields: [resolvedBy], references: [id])
 
   @@index([status])
@@ -139,7 +138,7 @@ model Payment {
 
 model DashboardStats {
   id                    String   @id @default(cuid())
-  pgId                  String
+  pgType                PgType 
   month                 Int
   year                  Int
   totalMembers          Int
@@ -153,14 +152,14 @@ model DashboardStats {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
-  @@unique([pgId, month, year])
+  @@unique([pgType, month, year])
 }
 
 model RegistrationStats {
   id                     String   @id @default(cuid())
   month                  Int
   year                   Int
-  pgType                 PgType // Track stats by PG type instead of individual PG
+  pgType                 PgType
   totalPendingRequests   Int
   longTermRequests       Int
   shortTermRequests      Int

@@ -44,4 +44,9 @@ export const memberPaymentQuerySchema = Joi.object({
   pgLocation: Joi.string().optional().allow(""),
   month: Joi.number().integer().min(1).max(12).optional(),
   year: Joi.number().integer().min(2020).max(2030).optional(),
+  sortBy: Joi.string().valid(
+    "createdAt", "name", "memberId", "dateOfJoining", "age", 
+    "location", "work", "pgName", "pgLocation", "roomNo", "rentAmount"
+  ).default("createdAt"),
+  sortOrder: Joi.string().valid("asc", "desc").default("desc"),
 });

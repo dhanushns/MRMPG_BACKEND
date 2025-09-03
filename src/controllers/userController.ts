@@ -8,6 +8,151 @@ import {
 import { Gender, RentType, PgType } from "@prisma/client";
 import { PersonalDataValidation, CreateMemberRequest, SubmitPaymentRequest } from "../types/request";
 
+// Get PG location filter options for user registration
+export const getPgLocationOptions = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    // Get pgType from query parameter (optional filter)
+    const pgType = req.query.pgType as PgType;
+
+    // Build where clause
+    const whereClause: any = {};
+    if (pgType && Object.values(PgType).includes(pgType)) {
+      whereClause.type = pgType;
+    }
+
+    // Get all PGs with their locations
+    const pgs = await prisma.pG.findMany({
+      where: whereClause,
+      select: {
+        id: true,
+        location: true,
+        name: true,
+        type: true,
+      },
+      orderBy: [
+        { type: "asc" },
+        { location: "asc" },
+      ],
+    });
+
+    // Create options array with pgId as value and location as label
+    const options = pgs
+      .filter(pg => pg.location) // Filter out null/undefined locations
+      .map(pg => ({
+        value: pg.id,
+        label: pg.location,
+        pgName: pg.name, // Additional info for frontend
+        pgType: pg.type, // Additional info for frontend
+      }));
+
+    res.status(200).json({
+      success: true,
+      message: "PG location options retrieved successfully",
+      data: {
+        options,
+      },
+    });
+  } catch (error) {
+    console.error("Error getting PG location options:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: "Failed to retrieve PG location options",
+    });
+  }
+};
+
+// Get rooms based on PG ID
+export const getRoomsByPgId = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    // Get pgId from query parameter (required)
+    const pgId = req.query.pgId as string;
+
+    if (!pgId) {
+      res.status(400).json({
+        success: false,
+        message: "PG ID is required",
+        error: "Please provide a valid PG ID to get rooms",
+      });
+      return;
+    }
+
+    // Verify PG exists
+    const pg = await prisma.pG.findUnique({
+      where: { id: pgId },
+      select: {
+        id: true,
+        name: true,
+        location: true,
+        type: true,
+      },
+    });
+
+    if (!pg) {
+      res.status(404).json({
+        success: false,
+        message: "PG not found",
+        error: "No PG found with the provided ID",
+      });
+      return;
+    }
+
+    // Get all rooms for the specified PG
+    const rooms = await prisma.room.findMany({
+      where: { pGId: pgId },
+      select: {
+        id: true,
+        roomNo: true,
+        capacity: true,
+        rent: true,
+        _count: {
+          select: {
+            members: true, // Count current members
+          },
+        },
+      },
+      orderBy: { roomNo: "asc" },
+    });
+
+    // Create options array with roomId as value and roomNo as label
+    const options = rooms.map(room => ({
+      value: room.id,
+      label: room.roomNo,
+      capacity: room.capacity,
+      currentOccupancy: room._count.members,
+      rent: room.rent,
+      isAvailable: room._count.members < room.capacity, // Check if room has space
+    }));
+
+    res.status(200).json({
+      success: true,
+      message: "Rooms retrieved successfully",
+      data: {
+        options,
+        pgInfo: {
+          id: pg.id,
+          name: pg.name,
+          location: pg.location,
+          type: pg.type,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error getting rooms by PG ID:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: "Failed to retrieve rooms",
+    });
+  }
+};
+
 export const validatePersonalData = async (
   req: Request,
   res: Response
@@ -298,13 +443,12 @@ export const submitPayment = async (
     const paymentData: SubmitPaymentRequest = {
       name: req.body.name,
       memberId: req.body.memberId,
-      roomNo: req.body.roomNo,
-      pgType: req.body.pgType as PgType,
-      pgLocation: req.body.pgLocation,
+      roomId: req.body.roomId,
+      pgId: req.body.pgId,
     };
 
     // Validate required fields
-    const requiredFields = ["name", "memberId", "roomNo", "pgType", "pgLocation"];
+    const requiredFields = ["name", "memberId", "roomId", "pgId"];
     const missingFields = requiredFields.filter(
       (field) => !paymentData[field as keyof SubmitPaymentRequest]
     );
@@ -336,6 +480,64 @@ export const submitPayment = async (
         success: false,
         message: "Both rent bill and electricity bill screenshots are required",
         error: "Please upload both rent bill and electricity bill screenshots",
+      });
+      return;
+    }
+
+    // Validate that the provided PG and Room exist and are related
+    const [pg, room] = await Promise.all([
+      prisma.pG.findUnique({
+        where: { id: paymentData.pgId },
+        select: { id: true, name: true, location: true, type: true },
+      }),
+      prisma.room.findUnique({
+        where: { id: paymentData.roomId },
+        select: { id: true, roomNo: true, rent: true, pGId: true },
+      }),
+    ]);
+
+    if (!pg) {
+      // Clean up uploaded files if PG not found
+      if (rentBillImage)
+        await deleteImage(rentBillImage.filename, ImageType.PAYMENT);
+      if (electricityBillImage)
+        await deleteImage(electricityBillImage.filename, ImageType.PAYMENT);
+
+      res.status(404).json({
+        success: false,
+        message: "PG not found",
+        error: "No PG found with the provided PG ID",
+      });
+      return;
+    }
+
+    if (!room) {
+      // Clean up uploaded files if room not found
+      if (rentBillImage)
+        await deleteImage(rentBillImage.filename, ImageType.PAYMENT);
+      if (electricityBillImage)
+        await deleteImage(electricityBillImage.filename, ImageType.PAYMENT);
+
+      res.status(404).json({
+        success: false,
+        message: "Room not found",
+        error: "No room found with the provided room ID",
+      });
+      return;
+    }
+
+    // Validate that the room belongs to the specified PG
+    if (room.pGId !== paymentData.pgId) {
+      // Clean up uploaded files if room-PG mismatch
+      if (rentBillImage)
+        await deleteImage(rentBillImage.filename, ImageType.PAYMENT);
+      if (electricityBillImage)
+        await deleteImage(electricityBillImage.filename, ImageType.PAYMENT);
+
+      res.status(400).json({
+        success: false,
+        message: "Room and PG mismatch",
+        error: "The provided room does not belong to the specified PG",
       });
       return;
     }
@@ -380,9 +582,8 @@ export const submitPayment = async (
     // Validate member details match the provided data
     if (
       member.name.toLowerCase() !== paymentData.name.toLowerCase() ||
-      member.pg.type !== paymentData.pgType ||
-      member.pg.location !== paymentData.pgLocation ||
-      member.room?.roomNo !== paymentData.roomNo
+      member.pg.id !== paymentData.pgId ||
+      member.room?.id !== paymentData.roomId
     ) {
       // Clean up uploaded files if validation fails
       if (rentBillImage)

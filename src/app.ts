@@ -5,6 +5,7 @@ import rateLimit from "express-rate-limit";
 import path from "path";
 import routes from "./routes";
 import { ENV } from "./config/env";
+import { initializePaymentScheduler } from "./utils/paymentScheduler";
 
 const app = express();
 
@@ -77,5 +78,10 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
     error: process.env.NODE_ENV === "development" ? err.message : "Something went wrong",
   });
 });
+
+// Initialize payment scheduler
+if (ENV.NODE_ENV === "development") {
+  initializePaymentScheduler();
+}
 
 export default app;

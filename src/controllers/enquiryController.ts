@@ -1,10 +1,9 @@
 import { Response, Request } from "express";
 import prisma from "../config/prisma";
 import { ApiResponse } from "../types/response";
-import { CreateEnquiryRequest, UpdateEnquiryStatusRequest } from "../types/request";
+import { CreateEnquiryRequest } from "../types/request";
 import { AuthenticatedRequest } from "../middlewares/auth";
 
-// CREATE new enquiry (public route - no authentication required)
 export const createEnquiry = async (
   req: Request,
   res: Response
@@ -65,6 +64,8 @@ export const getEnquiries = async (
       search,
       sortBy = "createdAt",
       sortOrder = "desc",
+      resolvedBy,
+      dateRange,
     } = req.query;
 
     // Parse pagination parameters
@@ -78,6 +79,25 @@ export const getEnquiries = async (
     // Filter by status if provided
     if (status && typeof status === "string") {
       whereClause.status = status;
+    }
+
+    // Filter by resolved by admin if provided
+    if (resolvedBy && typeof resolvedBy === "string") {
+      whereClause.resolvedBy = resolvedBy;
+    }
+
+    // Filter by date range if provided
+    if (dateRange && typeof dateRange === "string" && dateRange !== "all") {
+      const days = parseInt(dateRange, 10);
+      if (!isNaN(days)) {
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - days);
+        startDate.setHours(0, 0, 0, 0);
+        
+        whereClause.createdAt = {
+          gte: startDate,
+        };
+      }
     }
 
     // Search in name, phone, or message
@@ -212,7 +232,7 @@ export const getEnquiryById = async (
   }
 };
 
-// UPDATE enquiry status (admin only)
+// UPDATE enquiry status (admin only) - Mark enquiry as resolved
 export const updateEnquiryStatus = async (
   req: AuthenticatedRequest,
   res: Response
@@ -227,7 +247,6 @@ export const updateEnquiryStatus = async (
     }
 
     const { enquiryId } = req.params;
-    const { status }: UpdateEnquiryStatusRequest = req.body;
 
     // Check if enquiry exists
     const existingEnquiry = await prisma.enquiry.findUnique({
@@ -243,25 +262,23 @@ export const updateEnquiryStatus = async (
       return;
     }
 
-    // Prepare update data
-    const updateData: any = { status };
-
-    // If status is being set to RESOLVED and it wasn't resolved before
-    if (status === "RESOLVED" && existingEnquiry.status !== "RESOLVED") {
-      updateData.resolvedBy = req.admin.id;
-      updateData.resolvedAt = new Date();
+    // Check if enquiry is already resolved
+    if (existingEnquiry.status === "RESOLVED") {
+      res.status(400).json({
+        success: false,
+        message: "Enquiry is already resolved",
+      } as ApiResponse<null>);
+      return;
     }
 
-    // If status is being set to NOT_RESOLVED, clear resolved fields
-    if (status === "NOT_RESOLVED") {
-      updateData.resolvedBy = null;
-      updateData.resolvedAt = null;
-    }
-
-    // Update enquiry
+    // Update enquiry to resolved status
     const updatedEnquiry = await prisma.enquiry.update({
       where: { id: enquiryId },
-      data: updateData,
+      data: {
+        status: "RESOLVED",
+        resolvedBy: req.admin.id,
+        resolvedAt: new Date(),
+      },
       select: {
         id: true,
         name: true,
@@ -285,7 +302,7 @@ export const updateEnquiryStatus = async (
 
     res.status(200).json({
       success: true,
-      message: `Enquiry status updated to ${status.toLowerCase().replace("_", " ")}`,
+      message: "Enquiry marked as resolved successfully",
       data: updatedEnquiry,
     } as ApiResponse<any>);
   } catch (error) {
@@ -356,7 +373,7 @@ export const getEnquiryStats = async (
       {
         title: "Resolved Enquiries",
         value: formatNumber(resolvedEnquiries),
-        icon: "checkCircle",
+        icon: "checkCircle2",
         color: resolvedEnquiries > 0 ? "success" : "neutral",
         subtitle: `${resolutionRate}% resolution rate`,
         ...(resolutionRate === 100 && totalEnquiries > 0 && {
@@ -451,6 +468,111 @@ export const deleteEnquiry = async (
       success: false,
       message: "Internal server error",
       error: "Failed to delete enquiry",
+    } as ApiResponse<null>);
+  }
+};
+
+// GET enquiry filter options (admin only)
+export const getEnquiryFilterOptions = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Get all admins for "Resolved By" filter options
+    const allAdmins = await prisma.admin.findMany({
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        pgType: true,
+      },
+      orderBy: {
+        name: "asc",
+      },
+    });
+
+    const resolverOptions = allAdmins.map((admin) => ({
+      value: admin.id,
+      label: `${admin.name} (${admin.pgType})`,
+    }));
+
+    // Build filter options with proper structure for frontend
+    const filters = [
+      {
+        id: "search",
+        type: "search" as const,
+        placeholder: "Search by name, phone, or message...",
+        fullWidth: true,
+        gridSpan: 4,
+      },
+      {
+        id: "status",
+        label: "Status",
+        placeholder: "Select status",
+        type: "select",
+        options: [
+          { value: "NOT_RESOLVED", label: "Not Resolved" },
+          { value: "RESOLVED", label: "Resolved" },
+        ],
+        variant: "dropdown" as const,
+      },
+      {
+        id: "resolvedBy",
+        label: "Resolved By",
+        placeholder: "Select resolver",
+        type: "select",
+        options: resolverOptions,
+        variant: "dropdown" as const,
+        searchable: true,
+      },
+      {
+        id: "dateRange",
+        label: "Date Range",
+        placeholder: "Select date range",
+        type: "select",
+        options: [
+          { value: "7", label: "Last 7 days" },
+          { value: "30", label: "Last 30 days" },
+          { value: "90", label: "Last 3 months" },
+          { value: "180", label: "Last 6 months" },
+          { value: "365", label: "Last 1 year" },
+          { value: "all", label: "All time" },
+        ],
+        variant: "dropdown" as const,
+      },
+    ];
+
+    // Get total enquiries count for additional info
+    const totalEnquiries = await prisma.enquiry.count();
+
+    res.status(200).json({
+      success: true,
+      message: "Enquiry filter options retrieved successfully",
+      data: {
+        filters,
+        totalEnquiries,
+        defaultValues: {
+          page: 1,
+          limit: 10,
+          sortBy: "createdAt",
+          sortOrder: "desc",
+        },
+      },
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error("Error getting enquiry filter options:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: "Failed to retrieve enquiry filter options",
     } as ApiResponse<null>);
   }
 };
