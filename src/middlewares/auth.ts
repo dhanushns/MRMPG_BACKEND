@@ -1,10 +1,15 @@
 import { Request, Response, NextFunction } from "express";
 import { ApiResponse } from "../types/response";
-import { verifyToken, extractTokenFromHeader, JWTPayload } from "../utils/auth";
+import { verifyToken, verifyMemberToken as verifyMemberJWT, extractTokenFromHeader, JWTPayload, MemberJWTPayload } from "../utils/auth";
 
 // Extended Request interface to include admin data
 export interface AuthenticatedRequest extends Request {
   admin?: JWTPayload;
+}
+
+// Extended Request interface to include member data
+export interface AuthenticatedMemberRequest extends Request {
+  member?: MemberJWTPayload;
 }
 
 // Authentication middleware with JWT
@@ -72,4 +77,45 @@ export const authorizeAdmin = (
 
   // Additional admin role checks can be added here
   next();
+};
+
+// User authentication middleware with JWT
+export const authenticateUser = async (
+  req: AuthenticatedMemberRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = extractTokenFromHeader(authHeader);
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+        error: "Authorization token is required",
+      } as ApiResponse<null>);
+    }
+
+    // Verify member JWT token
+    const payload = verifyMemberJWT(token) as MemberJWTPayload;
+
+    // Attach member data to request
+    req.member = {
+      id: payload.id,
+      email: payload.email,
+      name: payload.name,
+      memberId: payload.memberId,
+      pgType: payload.pgType,
+      role: "member",
+    };
+
+    next();
+  } catch (error) {
+    return res.status(401).json({
+      success: false,
+      message: "Authentication failed",
+      error: "Invalid or expired token",
+    } as ApiResponse<null>);
+  }
 };

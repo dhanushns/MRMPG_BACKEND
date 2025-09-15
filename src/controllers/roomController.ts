@@ -318,7 +318,7 @@ export const createRoom = async (
     }
 
     const { pgId } = req.params;
-    const { roomNo, rent, capacity }: CreateRoomRequest = req.body;
+    const { roomNo, rent, electricityCharge, capacity }: CreateRoomRequest = req.body;
 
     if (!pgId) {
       res.status(400).json({
@@ -384,6 +384,7 @@ export const createRoom = async (
       data: {
         roomNo,
         rent,
+        electricityCharge,
         capacity,
         pGId: pgId,
       },
@@ -442,7 +443,7 @@ export const updateRoom = async (
     }
 
     const { roomId } = req.params;
-    const { roomNo, rent, capacity }: UpdateRoomRequest = req.body;
+    const { roomNo, rent, electricityCharge, capacity }: UpdateRoomRequest = req.body;
 
     if (!roomId) {
       res.status(400).json({
@@ -453,7 +454,7 @@ export const updateRoom = async (
     }
 
     // Validate at least one field is provided
-    if (!roomNo && !rent && !capacity) {
+    if (!roomNo && !rent && electricityCharge === undefined && !capacity) {
       res.status(400).json({
         success: false,
         message: "At least one field must be provided for update",
@@ -540,6 +541,7 @@ export const updateRoom = async (
       data: {
         ...(roomNo && { roomNo }),
         ...(rent !== undefined && { rent }),
+        ...(electricityCharge !== undefined && { electricityCharge }),
         ...(capacity !== undefined && { capacity }),
       },
       include: {

@@ -48,10 +48,12 @@ export const approveRejectMemberSchema = Joi.object({
     otherwise: Joi.string().optional(),
   }),
   roomId: Joi.string().optional(),
-  rentAmount: Joi.number().positive().optional(),
   advanceAmount: Joi.number().min(0).optional(),
   dateOfJoining: Joi.date().iso().optional(),
   pgLocation: Joi.string().optional(),
+  dateOfRelieving: Joi.date().iso().optional(),
+  pricePerDay: Joi.number().positive().optional(),
+  rentAmount: Joi.number().min(0).optional(),
 });
 
 // Members payment data query validation schema

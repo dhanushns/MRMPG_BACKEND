@@ -10,7 +10,7 @@ const mkdirAsync = promisify(fs.mkdir);
 // Image upload types
 export enum ImageType {
   PROFILE = 'profile',
-  AADHAR = 'aadhar',
+  DOCUMENT = 'document',
   PAYMENT = 'payment'
 }
 
@@ -32,7 +32,7 @@ const createUploadFolders = async (): Promise<void> => {
   try {
     const folders = [
       path.join(UPLOADS_BASE_DIR, 'profile'),
-      path.join(UPLOADS_BASE_DIR, 'aadhar'),
+      path.join(UPLOADS_BASE_DIR, 'document'),
       path.join(UPLOADS_BASE_DIR, 'payment')
     ];
 
@@ -104,12 +104,12 @@ export const profileImageUpload = multer({
   }
 });
 
-export const aadharImageUpload = multer({
-  storage: createStorage(ImageType.AADHAR),
+export const documentImageUpload = multer({
+  storage: createStorage(ImageType.DOCUMENT),
   fileFilter: fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit for aadhar images
-    files: 1 // Single aadhar image
+    fileSize: 10 * 1024 * 1024, // 10MB limit for document images
+    files: 1 // Single document image
   }
 });
 

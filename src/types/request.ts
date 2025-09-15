@@ -37,6 +37,7 @@ export interface UpdatePGRequest {
 export interface CreateRoomRequest {
   roomNo: string;
   rent: number;
+  electricityCharge: number;
   capacity: number;
   pgId: string;
 }
@@ -44,6 +45,7 @@ export interface CreateRoomRequest {
 export interface UpdateRoomRequest {
   roomNo?: string;
   rent?: number;
+  electricityCharge?: number;
   capacity?: number;
 }
 
@@ -60,6 +62,7 @@ export interface CreateMemberRequest {
   photoUrl?: string;
   aadharUrl?: string;
   rentType: RentType;
+  dateOfRelieving?: string;
   pgType: PgType;
 }
 
@@ -96,6 +99,13 @@ export interface ApproveRejectMemberRequest {
   rentAmount?: number;
   advanceAmount?: number;
   dateOfJoining?: string; // ISO date string
+  pricePerDay?: number; // For short-term members
+  dateOfRelieving?: string; // ISO date string for short-term members
+}
+
+// Member deletion types
+export interface DeleteMultipleMembersRequest {
+  memberIds: string[];
 }
 
 // Payment approval types

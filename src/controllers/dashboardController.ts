@@ -3,252 +3,6 @@ import prisma from "../config/prisma";
 import { ApiResponse } from "../types/response";
 import { AuthenticatedRequest } from "../middlewares/auth";
 
-    // Calculate and update current month dashboard statistics
-export const calculateAndUpdateDashboardStats = async (
-  req: AuthenticatedRequest,
-  res: Response
-): Promise<void> => {
-  try {
-    if (!req.admin) {
-      res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      } as ApiResponse<null>);
-      return;
-    }
-
-    // Get admin details to know their pgType
-    const admin = await prisma.admin.findUnique({
-      where: { id: req.admin.id },
-      select: { pgType: true },
-    });
-
-    if (!admin) {
-      res.status(404).json({
-        success: false,
-        message: "Admin not found",
-      } as ApiResponse<null>);
-      return;
-    }
-
-    // Get current month and year
-    const now = new Date();
-    const currentMonth = now.getMonth() + 1;
-    const currentYear = now.getFullYear();
-
-    // Get all PGs of admin's type
-    const pgs = await prisma.pG.findMany({
-      where: { type: admin.pgType },
-      select: { id: true },
-    });
-
-    const pgIds = pgs.map((pg) => pg.id);
-
-    // Calculate current month statistics aggregated for the entire pgType
-    // This aggregates data across all PGs of the same type (MENS/WOMENS)
-    const [
-      aggregatedTotalMembers,
-      aggregatedRentCollection,
-      aggregatedNewMembers,
-      aggregatedPaymentApprovals,
-      aggregatedRegistrationApprovals,
-    ] = await Promise.all([
-      // Total members across all PGs of this type
-      prisma.member.count({
-        where: { pgId: { in: pgIds } },
-      }),
-
-      // Rent collection for current month across all PGs of this type
-      prisma.payment.aggregate({
-        where: {
-          pgId: { in: pgIds },
-          month: currentMonth,
-          year: currentYear,
-          approvalStatus: "APPROVED",
-        },
-        _sum: { amount: true },
-      }),
-
-      // New members this month across all PGs of this type 
-      prisma.member.count({
-        where: {
-          pgId: { in: pgIds },
-          dateOfJoining: {
-            gte: new Date(currentYear, currentMonth - 1, 1),
-            lt: new Date(currentYear, currentMonth, 1),
-          },
-        },
-      }),
-
-      // Payment approvals this month across all PGs of this type
-      prisma.payment.count({
-        where: {
-          pgId: { in: pgIds },
-          month: currentMonth,
-          year: currentYear,
-          approvalStatus: "APPROVED",
-        },
-      }),
-
-      // Registration approvals this month across all PGs of this type
-      prisma.member.count({
-        where: {
-          pgId: { in: pgIds },
-          createdAt: {
-            gte: new Date(currentYear, currentMonth - 1, 1),
-            lt: new Date(currentYear, currentMonth, 1),
-          },
-        },
-      }),
-    ]);
-
-    // Get previous month stats for trend calculation
-    const prevMonth = currentMonth === 1 ? 12 : currentMonth - 1;
-    const prevYear = currentMonth === 1 ? currentYear - 1 : currentYear;
-
-    const previousStats = await prisma.dashboardStats.findFirst({
-      where: {
-        pgType: admin.pgType, // Use pgType directly
-        month: prevMonth,
-        year: prevYear,
-      },
-    });
-
-    // Calculate trends
-    const aggregatedTotalMemberTrend = previousStats
-      ? aggregatedTotalMembers - previousStats.totalMembers
-      : 0;
-
-    const aggregatedRentCollectionTrend = previousStats
-      ? (aggregatedRentCollection._sum.amount || 0) - previousStats.rentCollection
-      : 0;
-
-    const aggregatedNewMemberTrend = previousStats
-      ? aggregatedNewMembers - previousStats.newMembers
-      : 0;
-
-    const updatedStats = await prisma.dashboardStats.upsert({
-      where: {
-        pgType_month_year: {
-          pgType: admin.pgType,
-          month: currentMonth,
-          year: currentYear,
-        },
-      },
-      update: {
-        totalMembers: aggregatedTotalMembers,
-        rentCollection: aggregatedRentCollection._sum.amount || 0,
-        newMembers: aggregatedNewMembers,
-        paymentApprovals: aggregatedPaymentApprovals,
-        registrationApprovals: aggregatedRegistrationApprovals,
-        totalMemberTrend: aggregatedTotalMemberTrend,
-        rentCollectionTrend: aggregatedRentCollectionTrend,
-        newMemberTrend: aggregatedNewMemberTrend,
-        updatedAt: new Date(),
-      },
-      create: {
-        pgType: admin.pgType,
-        month: currentMonth,
-        year: currentYear,
-        totalMembers: aggregatedTotalMembers,
-        rentCollection: aggregatedRentCollection._sum.amount || 0,
-        newMembers: aggregatedNewMembers,
-        paymentApprovals: aggregatedPaymentApprovals,
-        registrationApprovals: aggregatedRegistrationApprovals,
-        totalMemberTrend: aggregatedTotalMemberTrend,
-        rentCollectionTrend: aggregatedRentCollectionTrend,
-        newMemberTrend: aggregatedNewMemberTrend,
-      },
-    });
-
-    // Use the updated stats directly (no need to fetch and re-aggregate)
-    const lastUpdated = updatedStats.updatedAt;
-    const totalMembers = updatedStats.totalMembers;
-    const totalRentCollection = updatedStats.rentCollection;
-    const totalNewMembers = updatedStats.newMembers;
-    const totalMemberTrend = updatedStats.totalMemberTrend;
-    const totalRentCollectionTrend = updatedStats.rentCollectionTrend;
-    const totalNewMemberTrend = updatedStats.newMemberTrend;
-
-    // Get pending approvals (real-time data with proper overdue detection)
-    const [pendingPayments, pendingRegistrations, overduePayments] = await Promise.all([
-      // Pending payment approvals: Members who paid and waiting for admin approval
-      prisma.payment.count({
-        where: {
-          pgId: { in: pgIds },
-          month: currentMonth,
-          year: currentYear,
-          paymentStatus: "PAID",
-          approvalStatus: "PENDING",
-        },
-      }),
-      prisma.registeredMember.count({
-        where: { pgType: admin.pgType },
-      }),
-      // Count overdue payments that need status update
-      prisma.payment.count({
-        where: {
-          pgId: { in: pgIds },
-          month: currentMonth,
-          year: currentYear,
-          approvalStatus: "PENDING",
-          paymentStatus: { in: ["PENDING", "OVERDUE"] },
-          overdueDate: {
-            lt: now, // overdue date has passed
-          },
-        },
-      }),
-    ]);
-
-    // Update overdue payment statuses in real-time
-    if (overduePayments > 0) {
-      await prisma.payment.updateMany({
-        where: {
-          pgId: { in: pgIds },
-          month: currentMonth,
-          year: currentYear,
-          approvalStatus: "PENDING",
-          paymentStatus: "PENDING", // Only update PENDING to OVERDUE
-          overdueDate: {
-            lt: now,
-          },
-        },
-        data: {
-          paymentStatus: "OVERDUE",
-        },
-      });
-    }
-
-    // Format cards using helper function
-    const cards = formatDashboardCards(
-      admin,
-      totalMembers,
-      totalRentCollection,
-      totalNewMembers,
-      totalMemberTrend,
-      totalRentCollectionTrend,
-      totalNewMemberTrend,
-      pendingPayments,
-      pendingRegistrations,
-      currentMonth,
-      currentYear
-    );
-
-    res.status(200).json({
-      success: true,
-      message: "Dashboard statistics calculated and updated successfully",
-      data: { cards, lastUpdated },
-    } as ApiResponse<any>);
-  } catch (error) {
-    console.error("Error calculating dashboard stats:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: "Failed to calculate dashboard statistics",
-    } as ApiResponse<null>);
-  }
-};
-
 // Helper function to format dashboard cards
 const formatDashboardCards = (
   admin: { pgType: any },
@@ -273,7 +27,7 @@ const formatDashboardCards = (
 
   // Format currency
   const formatCurrency = (amount: number): string => {
-    return `₹${amount.toLocaleString("en-IN")}`;
+    return `${amount.toLocaleString("en-IN")}`;
   };
 
   // Format number with commas
@@ -365,7 +119,7 @@ const formatDashboardCards = (
   ];
 };
 
-// Get dashboard statistics in card format (only fetch and format)
+// Get dashboard statistics in card format (calculate dynamically)
 export const getDashboardStats = async (
   req: AuthenticatedRequest,
   res: Response
@@ -406,65 +160,142 @@ export const getDashboardStats = async (
 
     const pgIds = pgs.map((pg) => pg.id);
 
-    const dashboardStats = await prisma.dashboardStats.findFirst({
-      where: {
-        pgType: admin.pgType,
-        month: currentMonth,
-        year: currentYear,
-      },
-    });
+    // Calculate current month statistics dynamically
+    const [
+      totalMembers,
+      rentCollection,
+      newMembers,
+      paymentApprovals,
+      registrationApprovals,
+    ] = await Promise.all([
+      // Total members across all PGs of this type
+      prisma.member.count({
+        where: { pgId: { in: pgIds } },
+      }),
 
-    if (!dashboardStats) {
-      res.status(200).json({
-        success: true,
-        message: "No dashboard statistics found. Please calculate stats first.",
-        data: { 
-          cards: [], 
-          lastUpdated: new Date(),
-          isEmpty: true,
+      // Rent collection for current month across all PGs of this type
+      prisma.payment.aggregate({
+        where: {
+          pgId: { in: pgIds },
+          month: currentMonth,
+          year: currentYear,
+          approvalStatus: "APPROVED",
         },
-      } as ApiResponse<any>);
-      return;
-    }
+        _sum: { amount: true },
+      }),
 
-    // Use the stats directly (single record, no need to aggregate)
-    const lastUpdated = dashboardStats.updatedAt;
-    const totalMembers = dashboardStats.totalMembers;
-    const totalRentCollection = dashboardStats.rentCollection;
-    const totalNewMembers = dashboardStats.newMembers;
-    const totalMemberTrend = dashboardStats.totalMemberTrend;
-    const totalRentCollectionTrend = dashboardStats.rentCollectionTrend;
-    const totalNewMemberTrend = dashboardStats.newMemberTrend;
+      // New members this month across all PGs of this type
+      prisma.member.count({
+        where: {
+          pgId: { in: pgIds },
+          dateOfJoining: {
+            gte: new Date(currentYear, currentMonth - 1, 1),
+            lt: new Date(currentYear, currentMonth, 1),
+          },
+        },
+      }),
 
-    // Get pending approvals (real-time data with proper overdue detection)
-    const [pendingPayments, pendingRegistrations, overduePayments] = await Promise.all([
-      // Pending payment approvals: Members who paid and waiting for admin approval
+      // Payment approvals this month across all PGs of this type
       prisma.payment.count({
         where: {
           pgId: { in: pgIds },
           month: currentMonth,
           year: currentYear,
-          paymentStatus: "PAID",
-          approvalStatus: "PENDING",
+          approvalStatus: "APPROVED",
         },
       }),
-      prisma.registeredMember.count({
-        where: { pgType: admin.pgType },
-      }),
-      // Count overdue payments that need status update
-      prisma.payment.count({
+
+      // Registration approvals this month across all PGs of this type
+      prisma.member.count({
         where: {
           pgId: { in: pgIds },
-          month: currentMonth,
-          year: currentYear,
-          approvalStatus: "PENDING",
-          paymentStatus: { in: ["PENDING", "OVERDUE"] },
-          overdueDate: {
-            lt: now, // overdue date has passed
+          createdAt: {
+            gte: new Date(currentYear, currentMonth - 1, 1),
+            lt: new Date(currentYear, currentMonth, 1),
           },
         },
       }),
     ]);
+
+    // Get previous month stats for trend calculation
+    const prevMonth = currentMonth === 1 ? 12 : currentMonth - 1;
+    const prevYear = currentMonth === 1 ? currentYear - 1 : currentYear;
+
+    const [prevTotalMembers, prevRentCollection, prevNewMembers] =
+      await Promise.all([
+        // Previous month total members (at the end of previous month)
+        prisma.member.count({
+          where: {
+            pgId: { in: pgIds },
+            dateOfJoining: {
+              lt: new Date(currentYear, currentMonth - 1, 1),
+            },
+          },
+        }),
+
+        // Previous month rent collection
+        prisma.payment.aggregate({
+          where: {
+            pgId: { in: pgIds },
+            month: prevMonth,
+            year: prevYear,
+            approvalStatus: "APPROVED",
+          },
+          _sum: { amount: true },
+        }),
+
+        // Previous month new members
+        prisma.member.count({
+          where: {
+            pgId: { in: pgIds },
+            dateOfJoining: {
+              gte: new Date(prevYear, prevMonth - 1, 1),
+              lt: new Date(prevYear, prevMonth, 1),
+            },
+          },
+        }),
+      ]);
+
+    // Calculate trends
+    const totalMemberTrend = totalMembers - prevTotalMembers;
+    const totalRentCollection = rentCollection._sum.amount || 0;
+    const prevTotalRentCollection = prevRentCollection._sum.amount || 0;
+    const totalRentCollectionTrend =
+      totalRentCollection - prevTotalRentCollection;
+    const totalNewMemberTrend = newMembers - prevNewMembers;
+
+    const lastUpdated = now;
+
+    // Get pending approvals (real-time data with proper overdue detection)
+    const [pendingPayments, pendingRegistrations, overduePayments] =
+      await Promise.all([
+        // Pending payment approvals: Members who paid and waiting for admin approval
+        prisma.payment.count({
+          where: {
+            pgId: { in: pgIds },
+            month: currentMonth,
+            year: currentYear,
+            paymentStatus: "PAID",
+            approvalStatus: "PENDING",
+          },
+        }),
+        prisma.registeredMember.count({
+          where: { pgType: admin.pgType },
+        }),
+        // Count overdue payments that need status update
+        prisma.payment.count({
+          where: {
+            pgId: { in: pgIds },
+            month: currentMonth,
+            year: currentYear,
+            approvalStatus: "PENDING",
+            paymentStatus: { in: ["PENDING", "OVERDUE"] },
+            overdueDate: {
+              lt: now, // overdue date has passed
+            },
+          },
+        }),
+      ]);
 
     // Update overdue payment statuses in real-time
     if (overduePayments > 0) {
@@ -490,7 +321,7 @@ export const getDashboardStats = async (
       admin,
       totalMembers,
       totalRentCollection,
-      totalNewMembers,
+      newMembers,
       totalMemberTrend,
       totalRentCollectionTrend,
       totalNewMemberTrend,
@@ -550,22 +381,23 @@ export const getAllMembers = async (
 
     // Get filter parameters (matching dashboard filter options)
     const pgId = req.query.pgId as string;
-    const rentType = req.query.rentType as string;
-    const paymentStatus = req.query.paymentStatus as string || req.query.status as string; // Support both field names
+    const paymentStatus =
+      (req.query.paymentStatus as string) || (req.query.status as string); // Support both field names
     const search = req.query.search as string;
-    
+
     // Get sorting parameters
-    const sortBy = req.query.sortBy as string || 'createdAt';
-    const sortOrder = req.query.sortOrder as string || 'desc';
+    const sortBy = (req.query.sortBy as string) || "createdAt";
+    const sortOrder = (req.query.sortOrder as string) || "desc";
 
     // Parse comma-separated values for multi-select filters (matching filter options)
     const parseMultiSelectValues = (param: string | undefined): string[] => {
       if (!param) return [];
-      return param.split(',').map(val => decodeURIComponent(val.trim())).filter(val => val.length > 0);
+      return param
+        .split(",")
+        .map((val) => decodeURIComponent(val.trim()))
+        .filter((val) => val.length > 0);
     };
 
-    const locations = parseMultiSelectValues(req.query.location as string);
-    const pgLocations = parseMultiSelectValues(req.query.pgLocation as string);
     const works = parseMultiSelectValues(req.query.work as string);
 
     // Get current month and year for payment status
@@ -584,6 +416,7 @@ export const getAllMembers = async (
     // Build where clause for members
     const whereClause: any = {
       pgId: { in: pgIds },
+      isActive: true,
     };
 
     // Apply filters (matching dashboard filter structure)
@@ -591,37 +424,9 @@ export const getAllMembers = async (
       whereClause.pgId = pgId;
     }
 
-    if (rentType) {
-      whereClause.rentType = rentType;
-    }
-
-    // Handle multiple locations (member location filter)
-    if (locations.length > 0) {
-      whereClause.location = { in: locations };
-    }
-
     // Handle multiple work types
     if (works.length > 0) {
       whereClause.work = { in: works };
-    }
-
-    // Filter by multiple PG locations (cascading filter)
-    if (pgLocations.length > 0) {
-      const pgsInLocation = await prisma.pG.findMany({
-        where: {
-          type: admin.pgType,
-          location: { in: pgLocations },
-        },
-        select: { id: true },
-      });
-      const pgIdsInLocation = pgsInLocation.map((pg) => pg.id);
-
-      if (pgIdsInLocation.length > 0) {
-        whereClause.pgId = { in: pgIdsInLocation };
-      } else {
-        // If no PGs found in locations, return empty result
-        whereClause.pgId = { in: [] };
-      }
     }
 
     // Handle search across multiple fields
@@ -636,27 +441,27 @@ export const getAllMembers = async (
 
     // Build order by clause for sorting
     const buildOrderBy = (sortBy: string, sortOrder: string): any => {
-      const order = sortOrder === 'asc' ? 'asc' : 'desc';
-      
+      const order = sortOrder === "asc" ? "asc" : "desc";
+
       switch (sortBy) {
-        case 'name':
-        case 'memberId':
-        case 'dateOfJoining':
-        case 'createdAt':
-        case 'age':
-        case 'location':
-        case 'work':
+        case "name":
+        case "memberId":
+        case "dateOfJoining":
+        case "createdAt":
+        case "age":
+        case "location":
+        case "work":
           return { [sortBy]: order };
-        case 'pgName':
+        case "pgName":
           return { pg: { name: order } };
-        case 'pgLocation':
+        case "pgLocation":
           return { pg: { location: order } };
-        case 'roomNo':
+        case "roomNo":
           return { room: { roomNo: order } };
-        case 'rentAmount':
+        case "rentAmount":
           return { room: { rent: order } };
         default:
-          return { createdAt: 'desc' };
+          return { createdAt: "desc" };
       }
     };
 
@@ -665,115 +470,53 @@ export const getAllMembers = async (
       where: whereClause,
     });
 
-    // Get members with related data
-    const members = await prisma.member.findMany({
-      where: whereClause,
-      include: {
-        pg: {
-          select: {
-            id: true,
-            name: true,
-            location: true,
-          },
-        },
-        room: {
-          select: {
-            id: true,
-            roomNo: true,
-            rent: true,
-          },
-        },
-        payment: {
-          where: {
-            month: currentMonth,
-            year: currentYear,
-          },
-          select: {
-            id: true,
-            paymentStatus: true,
-            approvalStatus: true,
-            amount: true,
-            month: true,
-            year: true,
-            dueDate: true,
-            overdueDate: true,
-            paidDate: true,
-            rentBillScreenshot: true,
-            electricityBillScreenshot: true,
-            attemptNumber: true,
-            createdAt: true,
-          },
-        },
-      },
-      skip: offset,
-      take: limit,
-      orderBy: buildOrderBy(sortBy, sortOrder),
-    });
+    // Process members and flatten data structure
+    const processMembers = (members: any[]) => {
+      return members.map((member: any) => {
+        const currentMonthPayment = member.payment?.find(
+          (p: any) => p.month === currentMonth && p.year === currentYear
+        );
 
-    // Process members and calculate payment status with proper overdue logic
-    const processedMembers = members.map((member: any) => {
-      const currentMonthPayment = member.payment?.find(
-        (p: any) => p.month === currentMonth && p.year === currentYear
-      );
+        // Flatten the data structure - extract pg and room data to top level
+        const { payment, pg, room, ...memberData } = member;
 
-      // Flatten the data structure - extract pg and room data to top level
-      const { payment, pg, room, ...memberData } = member;
-      
-      // Determine payment status based on payment record and dates
-      let calculatedPaymentStatus = "PENDING";
-      
-      if (currentMonthPayment) {
-        // If payment record exists, determine status based on approval and payment status
-        if (currentMonthPayment.approvalStatus === "APPROVED") {
-          calculatedPaymentStatus = "PAID";
-        } else if (currentMonthPayment.approvalStatus === "REJECTED") {
-          calculatedPaymentStatus = "OVERDUE";
-        } else if (currentMonthPayment.paymentStatus === "OVERDUE") {
-          calculatedPaymentStatus = "OVERDUE";
-        } else if (currentMonthPayment.paymentStatus === "PAID") {
-          calculatedPaymentStatus = "PENDING"; // Member paid, waiting for approval
-        } else {
-          // Check if payment is overdue based on overdueDate
-          const overdueDate = currentMonthPayment.overdueDate ? new Date(currentMonthPayment.overdueDate) : null;
-          if (overdueDate && now > overdueDate) {
-            calculatedPaymentStatus = "OVERDUE";
+        // Calculate rent amount based on member type
+        let rentAmount = 0;
+        if (memberData.rentType === 'SHORT_TERM') {
+          // For short-term members, calculate total amount for entire stay
+          if (memberData.pricePerDay && memberData.dateOfJoining && memberData.dateOfRelieving) {
+            const joiningDate = new Date(memberData.dateOfJoining);
+            const relievingDate = new Date(memberData.dateOfRelieving);
+            const timeDifference = relievingDate.getTime() - joiningDate.getTime();
+            const numberOfDays = Math.ceil(timeDifference / (1000 * 3600 * 24));
+            rentAmount = numberOfDays * memberData.pricePerDay;
           } else {
-            calculatedPaymentStatus = "PENDING";
+            rentAmount = memberData.pricePerDay || 0;
           }
+        } else {
+          // For long-term members, use room rent
+          rentAmount = room?.rent || 0;
         }
-      } else {
-        // No payment record should not happen with our new system, but handle gracefully
-        // This means the member should have a payment record but it's missing
-        calculatedPaymentStatus = "PENDING";
-      }
-      
-      return {
-        ...memberData,
-        pgLocation: pg?.location || '',
-        pgName: pg?.name || '',
-        roomNo: room?.roomNo || '',
-        paymentStatus: calculatedPaymentStatus,
-        rentAmount: room?.rent || 0,
-        currentMonthPayment: currentMonthPayment || null,
-        hasCurrentMonthPayment: !!currentMonthPayment,
-      };
-    });
 
-    // Apply payment status filter after processing (since it's calculated)
-    let filteredMembers = processedMembers;
-    if (paymentStatus) {
-      filteredMembers = processedMembers.filter((member) => {
-        return member.paymentStatus === paymentStatus;
+        return {
+          ...memberData,
+          pgLocation: pg?.location || "",
+          pgName: pg?.name || "",
+          roomNo: room?.roomNo || "", 
+          paymentStatus: currentMonthPayment?.paymentStatus || "PENDING",
+          approvalStatus: currentMonthPayment?.approvalStatus || "PENDING",
+          rentAmount: rentAmount,
+          currentMonthPayment: currentMonthPayment || null,
+          hasCurrentMonthPayment: !!currentMonthPayment,
+        };
       });
-    }
+    };
 
-    // Since payment status filter is applied after fetching, we need to handle pagination differently
-    // If payment status filter is applied, we need to fetch all and then paginate
-    let finalMembers = filteredMembers;
+    let finalMembers: any[] = [];
     let finalTotal = total;
-    
+
     if (paymentStatus) {
-      // For payment status filter, we need to get all members first, then filter and paginate
+      // Get all members with payment data for filtering
       const allMembers = await prisma.member.findMany({
         where: whereClause,
         include: {
@@ -816,59 +559,64 @@ export const getAllMembers = async (
         orderBy: buildOrderBy(sortBy, sortOrder),
       });
 
-      const allProcessedMembers = allMembers.map((member: any) => {
-        const currentMonthPayment = member.payment?.find(
-          (p: any) => p.month === currentMonth && p.year === currentYear
-        );
-
-        const { payment, pg, room, ...memberData } = member;
-        
-        let calculatedPaymentStatus = "PENDING";
-        
-        if (currentMonthPayment) {
-          // Use the same logic as the main processing function
-          if (currentMonthPayment.approvalStatus === "APPROVED") {
-            calculatedPaymentStatus = "PAID";
-          } else if (currentMonthPayment.approvalStatus === "REJECTED") {
-            calculatedPaymentStatus = "OVERDUE";
-          } else if (currentMonthPayment.paymentStatus === "OVERDUE") {
-            calculatedPaymentStatus = "OVERDUE";
-          } else if (currentMonthPayment.paymentStatus === "PAID") {
-            calculatedPaymentStatus = "PENDING"; // Member paid, waiting for approval
-          } else {
-            // Check if payment is overdue based on overdueDate
-            const overdueDate = currentMonthPayment.overdueDate ? new Date(currentMonthPayment.overdueDate) : null;
-            if (overdueDate && now > overdueDate) {
-              calculatedPaymentStatus = "OVERDUE";
-            } else {
-              calculatedPaymentStatus = "PENDING";
-            }
-          }
-        } else {
-          // No payment record should not happen with our new system
-          calculatedPaymentStatus = "PENDING";
-        }
-        
-        return {
-          ...memberData,
-          pgLocation: pg?.location || '',
-          pgName: pg?.name || '',
-          roomNo: room?.roomNo || '',
-          paymentStatus: calculatedPaymentStatus,
-          rentAmount: room?.rent || 0,
-          currentMonthPayment: currentMonthPayment || null,
-          hasCurrentMonthPayment: !!currentMonthPayment,
-        };
-      });
-
-      // Filter by payment status
-      const statusFilteredMembers = allProcessedMembers.filter((member) => {
+      // Process all members and filter by payment status
+      const processedMembers = processMembers(allMembers);
+      const statusFilteredMembers = processedMembers.filter((member) => {
         return member.paymentStatus === paymentStatus;
       });
 
       // Apply pagination to filtered results
       finalTotal = statusFilteredMembers.length;
       finalMembers = statusFilteredMembers.slice(offset, offset + limit);
+    } else {
+      // No payment status filter - use regular pagination
+      const members = await prisma.member.findMany({
+        where: whereClause,
+        include: {
+          pg: {
+            select: {
+              id: true,
+              name: true,
+              location: true,
+            },
+          },
+          room: {
+            select: {
+              id: true,
+              roomNo: true,
+              rent: true,
+            },
+          },
+          payment: {
+            where: {
+              month: currentMonth,
+              year: currentYear,
+            },
+            select: {
+              id: true,
+              paymentStatus: true,
+              approvalStatus: true,
+              amount: true,
+              month: true,
+              year: true,
+              dueDate: true,
+              overdueDate: true,
+              paidDate: true,
+              rentBillScreenshot: true,
+              electricityBillScreenshot: true,
+              attemptNumber: true,
+              createdAt: true,
+            },
+          },
+        },
+        skip: offset,
+        take: limit,
+        orderBy: buildOrderBy(sortBy, sortOrder),
+      });
+
+      // Process members with consistent logic
+      finalMembers = processMembers(members);
+      finalTotal = total;
     }
 
     const response = {
@@ -932,9 +680,6 @@ export const getDashboardFilterOptions = async (
 
     const pgIds = pgs.map((pg) => pg.id);
 
-    // Get pgLocation parameter for room filtering (cascading filter)
-    const pgLocation = req.query.pgLocation as string;
-
     // Get unique work types from members of admin's PG type
     const workTypes = await prisma.member.findMany({
       where: { pgId: { in: pgIds } },
@@ -942,60 +687,11 @@ export const getDashboardFilterOptions = async (
       distinct: ["work"],
     });
 
-    // Get unique locations from members of admin's PG type
-    const locations = await prisma.member.findMany({
-      where: { pgId: { in: pgIds } },
-      select: { location: true },
-      distinct: ["location"],
-    });
-
-    // Get unique PG locations for admin's PG type
-    const pgLocations = await prisma.pG.findMany({
-      where: { type: admin.pgType },
-      select: { location: true },
-      distinct: ["location"],
-    });
-
     // Get PG options for admin's PG type
     const pgOptions = await prisma.pG.findMany({
       where: { type: admin.pgType },
       select: { id: true, name: true, location: true },
       orderBy: { name: "asc" },
-    });
-
-    // Get rooms based on selected pg location (cascading filter)
-    let roomsFilter: any = { pGId: { in: pgIds } };
-    if (pgLocation) {
-      // Parse comma-separated values for multiple PG locations
-      const selectedPgLocations = pgLocation
-        .split(',')
-        .map(loc => decodeURIComponent(loc.trim()))
-        .filter(loc => loc.length > 0);
-
-      if (selectedPgLocations.length > 0) {
-        const pgsInLocation = await prisma.pG.findMany({
-          where: {
-            type: admin.pgType,
-            location: { in: selectedPgLocations },
-          },
-          select: { id: true },
-        });
-        const pgIdsInLocation = pgsInLocation.map((pg) => pg.id);
-        roomsFilter = { pGId: { in: pgIdsInLocation } };
-      }
-    }
-
-    const rooms = await prisma.room.findMany({
-      where: roomsFilter,
-      select: { id: true, roomNo: true },
-      orderBy: { roomNo: "asc" },
-    });
-
-    // Get unique rent types from members of admin's PG type
-    const rentTypes = await prisma.member.findMany({
-      where: { pgId: { in: pgIds } },
-      select: { rentType: true },
-      distinct: ["rentType"],
     });
 
     // Build filter options with proper structure for frontend
@@ -1020,42 +716,12 @@ export const getDashboardFilterOptions = async (
         searchable: true,
       },
       {
-        id: "pgLocation",
-        label: "PG Location",
-        placeholder: "Select PG location",
-        type: "multiSelect",
-        options: pgLocations
-          .filter(pg => pg.location) // Filter out null/undefined PG location values
-          .map((pgLoc) => ({
-            value: pgLoc.location,
-            label: pgLoc.location,
-          })),
-        variant: "dropdown" as const,
-        searchable: true,
-        showSelectAll: true,
-      },
-      {
-        id: "location",
-        label: "Member Location",
-        placeholder: "Select member location",
-        type: "multiSelect",
-        options: locations
-          .filter(loc => loc.location) // Filter out null/undefined location values
-          .map((location) => ({
-            value: location.location,
-            label: location.location,
-          })),
-        variant: "dropdown" as const,
-        searchable: true,
-        showSelectAll: true,
-      },
-      {
         id: "work",
         label: "Work Type",
         placeholder: "Select work type",
         type: "multiSelect",
         options: workTypes
-          .filter(w => w.work)
+          .filter((w) => w.work)
           .map((work) => ({
             value: work.work,
             label: work.work,
@@ -1065,26 +731,15 @@ export const getDashboardFilterOptions = async (
         showSelectAll: true,
       },
       {
-        id: "rentType",
-        label: "Rent Type",
-        placeholder: "Select rent type",
-        type: "select",
-        options: rentTypes
-          .filter(rt => rt.rentType)
-          .map((rentType) => ({
-            value: rentType.rentType,
-            label: rentType.rentType === 'LONG_TERM' ? 'Long Term' : 'Short Term',
-          })),
-        variant: "dropdown" as const,
-      },
-      {
         id: "paymentStatus",
         label: "Payment Status",
         placeholder: "Select payment status",
         type: "select",
         options: [
-          { value: "PAID", label: "Paid" },
           { value: "PENDING", label: "Pending" },
+          { value: "PAID", label: "Paid" },
+          { value: "APPROVED", label: "Approved" },
+          { value: "REJECTED", label: "Rejected" },
           { value: "OVERDUE", label: "Overdue" },
         ],
       },
@@ -1099,7 +754,6 @@ export const getDashboardFilterOptions = async (
           { value: "memberId", label: "Member ID" },
           { value: "dateOfJoining", label: "Joining Date" },
           { value: "age", label: "Age" },
-          { value: "location", label: "Member Location" },
           { value: "work", label: "Work Type" },
           { value: "pgName", label: "PG Name" },
           { value: "pgLocation", label: "PG Location" },
@@ -1124,10 +778,9 @@ export const getDashboardFilterOptions = async (
     res.status(200).json({
       success: true,
       message: "Dashboard filter options retrieved successfully",
-      data: { 
-        filters, 
+      data: {
+        filters,
         totalPGs: pgs.length,
-        totalRooms: rooms.length 
       },
     } as ApiResponse<any>);
   } catch (error) {

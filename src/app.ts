@@ -6,6 +6,7 @@ import path from "path";
 import routes from "./routes";
 import { ENV } from "./config/env";
 import { initializePaymentScheduler } from "./utils/paymentScheduler";
+import { expenseStatsScheduler } from "./utils/expenseStatsScheduler";
 
 const app = express();
 
@@ -79,9 +80,15 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
-// Initialize payment scheduler
+// Initialize schedulers
 if (ENV.NODE_ENV === "development") {
+  console.log('Initializing schedulers in development mode...');
+  
+  // Initialize payment scheduler
   initializePaymentScheduler();
+  
+  // Initialize expense stats scheduler
+  expenseStatsScheduler.start();
 }
 
 export default app;

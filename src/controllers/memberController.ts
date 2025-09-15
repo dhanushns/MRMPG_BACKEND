@@ -2,139 +2,8 @@ import { Response } from "express";
 import prisma from "../config/prisma";
 import { ApiResponse } from "../types/response";
 import { AuthenticatedRequest } from "../middlewares/auth";
-
-// Helper function to calculate member's next due date based on joining date
-const calculateMemberNextDueDate = (joiningDate: Date, currentDate: Date = new Date()): Date => {
-  const joiningDay = joiningDate.getDate();
-  const currentMonth = currentDate.getMonth();
-  const currentYear = currentDate.getFullYear();
-  
-  // Start with current month
-  let nextDueDate = new Date(currentYear, currentMonth, joiningDay);
-  
-  // If the due date for current month has passed, move to next month
-  if (nextDueDate <= currentDate) {
-    nextDueDate.setMonth(nextDueDate.getMonth() + 1);
-  }
-  
-  // Handle cases where the joining day doesn't exist in the target month
-  if (nextDueDate.getDate() !== joiningDay) {
-    nextDueDate = new Date(nextDueDate.getFullYear(), nextDueDate.getMonth() + 1, 0); // Last day of month
-  }
-  
-  return nextDueDate;
-};
-
-// Helper function to calculate member's current billing cycle due date
-const calculateCurrentBillingCycleDueDate = (joiningDate: Date, currentDate: Date = new Date()): Date => {
-  const joiningDay = joiningDate.getDate();
-  
-  // Start from joining date to find current billing cycle
-  let cycleStartDate = new Date(joiningDate);
-  let currentDueDate = new Date(joiningDate);
-  currentDueDate.setMonth(currentDueDate.getMonth() + 1); // First due date
-  
-  // Handle month-end edge cases for first due date
-  if (currentDueDate.getDate() !== joiningDay) {
-    const targetMonth = currentDueDate.getMonth();
-    const targetYear = currentDueDate.getFullYear();
-    const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
-    currentDueDate.setDate(Math.min(joiningDay, lastDayOfMonth));
-  }
-  
-  // If we're still in the first billing cycle, return first due date
-  if (currentDate < currentDueDate) {
-    return currentDueDate;
-  }
-  
-  // Keep moving forward until we find the current billing cycle
-  while (currentDueDate <= currentDate) {
-    const nextDueDate = new Date(currentDueDate);
-    nextDueDate.setMonth(nextDueDate.getMonth() + 1);
-    
-    // Handle month-end edge cases
-    if (nextDueDate.getDate() !== joiningDay) {
-      const targetMonth = nextDueDate.getMonth();
-      const targetYear = nextDueDate.getFullYear();
-      const lastDayOfMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
-      nextDueDate.setDate(Math.min(joiningDay, lastDayOfMonth));
-    }
-    
-    // If the next due date would be in the future, current due date is the one we want
-    if (nextDueDate > currentDate) {
-      break;
-    }
-    
-    currentDueDate = nextDueDate;
-  }
-  
-  return currentDueDate;
-};
-
-// Helper function to determine payment status based on member's payment records and real-time overdue detection
-const determineMemberPaymentStatus = (
-  member: any,
-  currentDate: Date = new Date()
-): { status: string; currentDueDate: Date | null; isOverdue: boolean } => {
-  const joiningDate = new Date(member.dateOfJoining);
-  const currentMonth = currentDate.getMonth() + 1;
-  const currentYear = currentDate.getFullYear();
-  
-  // Find payment record for current month/year
-  const currentMonthPayment = member.payment?.find((p: any) => {
-    return p.month === currentMonth && p.year === currentYear;
-  });
-  
-  let status = "PENDING";
-  let currentDueDate: Date | null = null;
-  let isOverdue = false;
-  
-  if (currentMonthPayment) {
-    // Use existing payment record's due date and status
-    currentDueDate = currentMonthPayment.dueDate ? new Date(currentMonthPayment.dueDate) : null;
-    const overdueDate = currentMonthPayment.overdueDate ? new Date(currentMonthPayment.overdueDate) : null;
-    
-    if (currentMonthPayment.approvalStatus === "APPROVED") {
-      status = "PAID";
-    } else if (currentMonthPayment.approvalStatus === "REJECTED") {
-      status = "OVERDUE";
-      isOverdue = true;
-    } else if (currentMonthPayment.paymentStatus === "OVERDUE" || 
-               (overdueDate && currentDate > overdueDate)) {
-      status = "OVERDUE";
-      isOverdue = true;
-    } else {
-      status = "PENDING";
-    }
-  } else {
-    // No payment record for current month - calculate due date and check if overdue
-    const joiningDay = joiningDate.getDate();
-    currentDueDate = new Date(currentYear, currentMonth - 1, joiningDay);
-    
-    // Handle month-end edge cases
-    if (currentDueDate.getDate() !== joiningDay) {
-      const lastDayOfMonth = new Date(currentYear, currentMonth, 0).getDate();
-      currentDueDate.setDate(Math.min(joiningDay, lastDayOfMonth));
-    }
-    
-    // Calculate overdue date (7 days after due date)
-    const overdueDate = new Date(currentDueDate);
-    overdueDate.setDate(overdueDate.getDate() + 7);
-    
-    // Check if member should have a payment for current month
-    const currentMonthEnd = new Date(currentYear, currentMonth, 0);
-    if (joiningDate <= currentMonthEnd) {
-      if (currentDate > overdueDate) {
-        status = "OVERDUE";
-        isOverdue = true;
-      } else {
-        status = "PENDING";
-      }
-    }
-  }
-  
-  return { status, currentDueDate, isOverdue };
-};
+import { deleteImage, ImageType } from "../utils/imageUpload";
+import { DeleteMultipleMembersRequest } from "../types/request";
 
 // Get members by rent type with filters
 export const getMembersByRentType = async (
@@ -193,12 +62,13 @@ export const getMembersByRentType = async (
     // Parse comma-separated values for multi-select filters
     const parseMultipleValues = (param: string | undefined): string[] => {
       if (!param) return [];
-      return param.split(',').map(val => decodeURIComponent(val.trim())).filter(val => val.length > 0);
+      return param
+        .split(",")
+        .map((val) => decodeURIComponent(val.trim()))
+        .filter((val) => val.length > 0);
     };
 
-    const locations = parseMultipleValues(req.query.location as string);
     const pgLocations = parseMultipleValues(req.query.pgLocation as string);
-    const works = parseMultipleValues(req.query.work as string);
 
     // Get sorting parameters
     const sortBy = (req.query.sortBy as string) || "createdAt";
@@ -221,16 +91,6 @@ export const getMembersByRentType = async (
       pgId: { in: pgIds },
       rentType: rentType,
     };
-
-    // Handle multiple locations
-    if (locations.length > 0) {
-      whereClause.location = { in: locations };
-    }
-
-    // Handle multiple work types
-    if (works.length > 0) {
-      whereClause.work = { in: works };
-    }
 
     // Filter by multiple PG locations
     if (pgLocations.length > 0) {
@@ -262,32 +122,30 @@ export const getMembersByRentType = async (
 
     // Prepare order by clause for sorting
     const buildOrderBy = (sortBy: string, sortOrder: string): any => {
-      const order = sortOrder === 'asc' ? 'asc' : 'desc';
-      
+      const order = sortOrder === "asc" ? "asc" : "desc";
+
       switch (sortBy) {
-        case 'name':
-        case 'memberId':
-        case 'dateOfJoining':
-        case 'createdAt':
-        case 'age':
-        case 'location':
-        case 'work':
-        case 'gender':
-        case 'email':
-        case 'phone':
-        case 'rentType':
-        case 'advanceAmount':
+        case "name":
+        case "memberId":
+        case "dateOfJoining":
+        case "createdAt":
+        case "age":
+        case "gender":
+        case "email":
+        case "phone":
+        case "rentType":
+        case "advanceAmount":
           return { [sortBy]: order };
-        case 'pgName':
+        case "pgName":
           return { pg: { name: order } };
-        case 'pgLocation':
+        case "pgLocation":
           return { pg: { location: order } };
-        case 'roomNo':
+        case "roomNo":
           return { room: { roomNo: order } };
-        case 'rentAmount':
+        case "rentAmount":
           return { room: { rent: order } };
         default:
-          return { createdAt: 'desc' };
+          return { createdAt: "desc" };
       }
     };
 
@@ -332,30 +190,28 @@ export const getMembersByRentType = async (
       orderBy: buildOrderBy(sortBy, sortOrder),
     });
 
-    // Process members data to determine payment status based on current month payment records
+    // Process members data to use payment status from database
     const processedMembers = members.map((member) => {
       // Flatten the data structure - extract pg and room data to top level
       const { payment, pg, room, ...memberData } = member;
-      
-      // Determine payment status based on current month payment record
-      const { status: calculatedPaymentStatus, currentDueDate, isOverdue } = determineMemberPaymentStatus(member, now);
-      
+
       // Find payment for current month
       const currentMonthPayment = payment?.find((p) => {
         return p.month === currentMonth && p.year === currentYear;
       });
-      
+
       return {
         ...memberData,
-        pgLocation: pg?.location || '',
-        pgName: pg?.name || '',
-        roomNo: room?.roomNo || '',
+        pgLocation: pg?.location || "",
+        pgName: pg?.name || "",
+        roomNo: room?.roomNo || "",
         rentAmount: room?.rent || 0,
-        paymentStatus: calculatedPaymentStatus,
-        status: calculatedPaymentStatus, // Additional status field as requested
-        currentDueDate: currentDueDate,
-        isOverdue: isOverdue,
-        nextDueDate: calculateMemberNextDueDate(new Date(memberData.dateOfJoining), now),
+        paymentStatus: currentMonthPayment?.paymentStatus || "PENDING",
+        approvalStatus: currentMonthPayment?.approvalStatus || "PENDING",
+        nextDueDate: currentMonthPayment?.dueDate
+          ? new Date(currentMonthPayment.dueDate)
+          : null,
+        isOverdue: currentMonthPayment?.paymentStatus === "OVERDUE",
         currentMonthPayment: currentMonthPayment || null,
         hasCurrentMonthPayment: !!currentMonthPayment,
       };
@@ -363,17 +219,36 @@ export const getMembersByRentType = async (
 
     // Filter by payment status if specified
     let filteredMembers = processedMembers;
-    if (paymentStatus && ["PAID", "PENDING", "OVERDUE"].includes(paymentStatus)) {
-      filteredMembers = processedMembers.filter(
-        (member) => member.paymentStatus === paymentStatus
-      );
+    if (
+      paymentStatus &&
+      ["PAID", "PENDING", "OVERDUE"].includes(paymentStatus)
+    ) {
+      filteredMembers = processedMembers.filter((member) => {
+        // Map payment status for filtering
+        if (paymentStatus === "PAID" && member.approvalStatus === "APPROVED") {
+          return true;
+        }
+        if (paymentStatus === "OVERDUE" && 
+            (member.paymentStatus === "OVERDUE" || member.approvalStatus === "REJECTED")) {
+          return true;
+        }
+        if (paymentStatus === "PENDING" && 
+            member.paymentStatus === "PENDING" && 
+            member.approvalStatus !== "APPROVED" && 
+            member.approvalStatus !== "REJECTED") {
+          return true;
+        }
+        return false;
+      });
     }
 
-    
     let finalMembers = filteredMembers;
     let finalTotal = total;
-    
-    if (paymentStatus && ["PAID", "PENDING", "OVERDUE"].includes(paymentStatus)) {
+
+    if (
+      paymentStatus &&
+      ["PAID", "PENDING", "OVERDUE"].includes(paymentStatus)
+    ) {
       // For payment status filter, we need to get all members first, then filter and paginate
       const allMembers = await prisma.member.findMany({
         where: whereClause,
@@ -416,34 +291,46 @@ export const getMembersByRentType = async (
       const allProcessedMembers = allMembers.map((member) => {
         // Flatten the data structure - extract pg and room data to top level
         const { payment, pg, room, ...memberData } = member;
-        
-        // Determine payment status based on current month payment record
-        const { status: calculatedPaymentStatus, currentDueDate, isOverdue } = determineMemberPaymentStatus(member, now);
-        
+
         // Find payment for current month
         const currentMonthPayment = payment?.find((p) => {
           return p.month === currentMonth && p.year === currentYear;
         });
-        
+
         return {
           ...memberData,
-          pgLocation: pg?.location || '',
-          pgName: pg?.name || '',
-          roomNo: room?.roomNo || '',
+          pgLocation: pg?.location || "",
+          pgName: pg?.name || "",
+          roomNo: room?.roomNo || "",
           rentAmount: room?.rent || 0,
-          paymentStatus: calculatedPaymentStatus,
-          status: calculatedPaymentStatus,
-          currentDueDate: currentDueDate,
-          isOverdue: isOverdue,
-          nextDueDate: calculateMemberNextDueDate(new Date(memberData.dateOfJoining), now),
+          paymentStatus: currentMonthPayment?.paymentStatus || "PENDING",
+          approvalStatus: currentMonthPayment?.approvalStatus || "PENDING",
+          nextDueDate: currentMonthPayment?.dueDate
+            ? new Date(currentMonthPayment.dueDate)
+            : null,
+          isOverdue: currentMonthPayment?.paymentStatus === "OVERDUE",
           currentMonthPayment: currentMonthPayment || null,
           hasCurrentMonthPayment: !!currentMonthPayment,
         };
       });
 
-      // Filter by payment status
+      // Filter by payment status with correct logic
       const statusFilteredMembers = allProcessedMembers.filter((member) => {
-        return member.paymentStatus === paymentStatus;
+        // Map payment status for filtering
+        if (paymentStatus === "PAID" && member.approvalStatus === "APPROVED") {
+          return true;
+        }
+        if (paymentStatus === "OVERDUE" && 
+            (member.paymentStatus === "OVERDUE" || member.approvalStatus === "REJECTED")) {
+          return true;
+        }
+        if (paymentStatus === "PENDING" && 
+            member.paymentStatus === "PENDING" && 
+            member.approvalStatus !== "APPROVED" && 
+            member.approvalStatus !== "REJECTED") {
+          return true;
+        }
+        return false;
       });
 
       // Apply pagination to filtered results
@@ -453,7 +340,9 @@ export const getMembersByRentType = async (
 
     res.status(200).json({
       success: true,
-      message: `${rentType.toLowerCase().replace('_', '-')} members retrieved successfully`,
+      message: `${rentType
+        .toLowerCase()
+        .replace("_", "-")} members retrieved successfully`,
       data: {
         tableData: finalMembers,
       },
@@ -513,20 +402,6 @@ export const getMemberFilterOptions = async (
     // Get pgLocation parameter for room filtering (cascading filter)
     const pgLocation = req.query.pgLocation as string;
 
-    // Get unique work types from members of admin's PG type
-    const workTypes = await prisma.member.findMany({
-      where: { pgId: { in: pgIds } },
-      select: { work: true },
-      distinct: ["work"],
-    });
-
-    // Get unique locations from members of admin's PG type
-    const locations = await prisma.member.findMany({
-      where: { pgId: { in: pgIds } },
-      select: { location: true },
-      distinct: ["location"],
-    });
-
     // Get unique PG locations for admin's PG type
     const pgLocations = await prisma.pG.findMany({
       where: { type: admin.pgType },
@@ -539,9 +414,9 @@ export const getMemberFilterOptions = async (
     if (pgLocation) {
       // Parse comma-separated values for multiple PG locations
       const selectedPgLocations = pgLocation
-        .split(',')
-        .map(loc => decodeURIComponent(loc.trim()))
-        .filter(loc => loc.length > 0);
+        .split(",")
+        .map((loc) => decodeURIComponent(loc.trim()))
+        .filter((loc) => loc.length > 0);
 
       if (selectedPgLocations.length > 0) {
         const pgsInLocation = await prisma.pG.findMany({
@@ -562,13 +437,6 @@ export const getMemberFilterOptions = async (
       orderBy: { roomNo: "asc" },
     });
 
-    // Get unique rent types from members of admin's PG type
-    const rentTypes = await prisma.member.findMany({
-      where: { pgId: { in: pgIds } },
-      select: { rentType: true },
-      distinct: ["rentType"],
-    });
-
     // Build filter options with proper structure for frontend
     const filters = [
       {
@@ -579,42 +447,12 @@ export const getMemberFilterOptions = async (
         gridSpan: 4,
       },
       {
-        id: "location",
-        label: "Member Location",
-        placeholder: "Select member location",
-        type: "multiSelect",
-        options: locations
-          .filter(loc => loc.location) // Filter out null/undefined location values
-          .map((location) => ({
-            value: location.location,
-            label: location.location,
-          })),
-        variant: "dropdown" as const,
-        searchable: true,
-        showSelectAll: true,
-      },
-      {
-        id: "work",
-        label: "Work Type",
-        placeholder: "Select work type",
-        type: "multiSelect",
-        options: workTypes
-          .filter(w => w.work)
-          .map((work) => ({
-            value: work.work,
-            label: work.work,
-          })),
-        variant: "dropdown" as const,
-        searchable: true,
-        showSelectAll: true,
-      },
-      {
         id: "pgLocation",
         label: "PG Location",
         placeholder: "Select PG location",
         type: "multiSelect",
         options: pgLocations
-          .filter(pg => pg.location) // Filter out null/undefined PG location values
+          .filter((pg) => pg.location) // Filter out null/undefined PG location values
           .map((pgLoc) => ({
             value: pgLoc.location,
             label: pgLoc.location,
@@ -645,8 +483,6 @@ export const getMemberFilterOptions = async (
           { value: "memberId", label: "Member ID" },
           { value: "dateOfJoining", label: "Joining Date" },
           { value: "age", label: "Age" },
-          { value: "location", label: "Member Location" },
-          { value: "work", label: "Work Type" },
           { value: "pgName", label: "PG Name" },
           { value: "pgLocation", label: "PG Location" },
           { value: "roomNo", label: "Room Number" },
@@ -670,10 +506,10 @@ export const getMemberFilterOptions = async (
     res.status(200).json({
       success: true,
       message: "Member filter options retrieved successfully",
-      data: { 
-        filters, 
+      data: {
+        filters,
         totalPGs: pgs.length,
-        totalRooms: rooms.length 
+        totalRooms: rooms.length,
       },
     } as ApiResponse<any>);
   } catch (error) {
@@ -761,12 +597,22 @@ export const getMemberDetails = async (
       return;
     }
 
-    // Calculate tenure
+    // Calculate tenure - more accurate calculation
     const now = new Date();
     const joiningDate = new Date(member.dateOfJoining);
-    const diffTime = Math.abs(now.getTime() - joiningDate.getTime());
+    const relievingDate = member.dateOfRelieving
+      ? new Date(member.dateOfRelieving)
+      : null;
+
+    // Use relieving date for SHORT_TERM members who have left, otherwise use current date
+    const endDate =
+      member.rentType === "SHORT_TERM" && relievingDate && relievingDate <= now
+        ? relievingDate
+        : now;
+
+    const diffTime = Math.abs(endDate.getTime() - joiningDate.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
+
     const years = Math.floor(diffDays / 365);
     const months = Math.floor((diffDays % 365) / 30);
     const days = diffDays % 30;
@@ -785,17 +631,15 @@ export const getMemberDetails = async (
         month: true,
         year: true,
         createdAt: true,
+        rejectedReason: true,
       },
+      orderBy: [{ year: "desc" }, { month: "desc" }, { createdAt: "desc" }],
     });
 
     // Get payment history with pagination
-    const paymentHistory = allPayments
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .slice(offset, offset + limit);
+    const paymentHistory = allPayments.slice(offset, offset + limit);
 
     // Calculate payment summary based on member's individual billing cycles
-    const memberJoiningDate = new Date(member.dateOfJoining);
-    
     let approvedPaymentsCount = 0;
     let pendingPaymentsCount = 0;
     let rejectedPaymentsCount = 0;
@@ -807,9 +651,12 @@ export const getMemberDetails = async (
     let lastPaymentDate: Date | null = null;
     let lastApprovedPayment: Date | null = null;
 
-    // Process existing payment records
+    // Process existing payment records with improved logic
     allPayments.forEach((payment) => {
       const paymentDate = payment.paidDate ? new Date(payment.paidDate) : null;
+      const overdueDate = payment.overdueDate
+        ? new Date(payment.overdueDate)
+        : null;
 
       // Update last payment date regardless of status
       if (paymentDate && (!lastPaymentDate || paymentDate > lastPaymentDate)) {
@@ -820,22 +667,25 @@ export const getMemberDetails = async (
       if (payment.approvalStatus === "APPROVED") {
         approvedPaymentsCount++;
         totalAmountPaid += payment.amount;
-        
-        if (paymentDate && (!lastApprovedPayment || paymentDate > lastApprovedPayment)) {
+
+        if (
+          paymentDate &&
+          (!lastApprovedPayment || paymentDate > lastApprovedPayment)
+        ) {
           lastApprovedPayment = paymentDate;
         }
       } else if (payment.approvalStatus === "REJECTED") {
         rejectedPaymentsCount++;
         totalAmountRejected += payment.amount;
-        
+
         // Rejected payments are also overdue since they need to be paid again
         overduePaymentsCount++;
         totalAmountOverdue += payment.amount;
       } else if (payment.approvalStatus === "PENDING") {
         // Check if payment is overdue based on overdue date
-        const overdueDate = payment.overdueDate ? new Date(payment.overdueDate) : null;
-        const isOverdue = payment.paymentStatus === "OVERDUE" || 
-                         (overdueDate && now > overdueDate);
+        const isOverdue =
+          payment.paymentStatus === "OVERDUE" ||
+          (overdueDate && now > overdueDate);
 
         if (isOverdue) {
           overduePaymentsCount++;
@@ -846,9 +696,9 @@ export const getMemberDetails = async (
         }
       } else {
         // Handle null or other approval statuses
-        const overdueDate = payment.overdueDate ? new Date(payment.overdueDate) : null;
-        const isOverdue = payment.paymentStatus === "OVERDUE" || 
-                         (overdueDate && now > overdueDate);
+        const isOverdue =
+          payment.paymentStatus === "OVERDUE" ||
+          (overdueDate && now > overdueDate);
 
         if (isOverdue) {
           overduePaymentsCount++;
@@ -860,8 +710,54 @@ export const getMemberDetails = async (
       }
     });
 
-    // Calculate next due date
-    const nextDueDate = calculateMemberNextDueDate(memberJoiningDate, now);
+    // Get current payment status from database
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+
+    // Find current month payment
+    const currentMonthPayment = allPayments.find((p) => {
+      return p.month === currentMonth && p.year === currentYear;
+    });
+
+    // Determine current payment status from database
+    let currentPaymentStatus = "PENDING";
+    let isOverdue = false;
+    let currentDueDate: Date | null = null;
+
+    if (currentMonthPayment) {
+      if (currentMonthPayment.approvalStatus === "APPROVED") {
+        currentPaymentStatus = "PAID";
+      } else if (currentMonthPayment.approvalStatus === "REJECTED") {
+        currentPaymentStatus = "OVERDUE";
+        isOverdue = true;
+      } else if (currentMonthPayment.paymentStatus === "OVERDUE") {
+        currentPaymentStatus = "OVERDUE";
+        isOverdue = true;
+      } else {
+        currentPaymentStatus = "PENDING";
+      }
+      currentDueDate = currentMonthPayment.dueDate
+        ? new Date(currentMonthPayment.dueDate)
+        : null;
+    }
+
+    // Calculate expected payments for SHORT_TERM members
+    let expectedTotalAmount = 0;
+    if (
+      member.rentType === "SHORT_TERM" &&
+      member.pricePerDay &&
+      relievingDate
+    ) {
+      const stayDays = Math.ceil(
+        (relievingDate.getTime() - joiningDate.getTime()) /
+          (1000 * 60 * 60 * 24)
+      );
+      expectedTotalAmount = stayDays * member.pricePerDay;
+    } else if (member.rentType === "LONG_TERM" && member.room?.rent) {
+      // For long term, calculate based on months stayed
+      const monthsStayed = Math.floor(diffDays / 30) + 1; // +1 for current/partial month
+      expectedTotalAmount = monthsStayed * member.room.rent;
+    }
 
     // Format member data
     const { pg, room, ...memberData } = member;
@@ -873,10 +769,21 @@ export const getMemberDetails = async (
         days,
         months,
         years,
+        totalDays: diffDays,
       },
+      currentPaymentStatus,
+      isCurrentlyOverdue: isOverdue,
+      expectedTotalAmount,
+      actualDays:
+        member.rentType === "SHORT_TERM" && relievingDate
+          ? Math.ceil(
+              (relievingDate.getTime() - joiningDate.getTime()) /
+                (1000 * 60 * 60 * 24)
+            )
+          : null,
     };
 
-    // Simplified payment summary with only essential fields
+    // Enhanced payment summary with additional insights
     const paymentSummary = {
       approvedPayments: approvedPaymentsCount,
       pendingPayments: pendingPaymentsCount,
@@ -888,7 +795,25 @@ export const getMemberDetails = async (
       totalAmountOverdue,
       lastPaymentDate,
       lastApprovedPayment,
-      nextDueDate,
+      currentDueDate,
+      nextDueDate: null, // No longer calculated
+      paymentEfficiency:
+        approvedPaymentsCount /
+        Math.max(
+          1,
+          approvedPaymentsCount + rejectedPaymentsCount + overduePaymentsCount
+        ),
+      outstandingAmount:
+        totalAmountPending + totalAmountOverdue + totalAmountRejected,
+      expectedVsActual: {
+        expected: expectedTotalAmount,
+        paid: totalAmountPaid,
+        pending: totalAmountPending + totalAmountOverdue,
+        percentage:
+          expectedTotalAmount > 0
+            ? (totalAmountPaid / expectedTotalAmount) * 100
+            : 0,
+      },
     };
 
     res.status(200).json({
@@ -914,6 +839,374 @@ export const getMemberDetails = async (
       success: false,
       message: "Internal server error",
       error: "Failed to retrieve member details",
+    } as ApiResponse<null>);
+  }
+};
+
+// Helper function to extract image filename from URL or path
+const extractImageFilename = (imageUrl: string | null): string | null => {
+  if (!imageUrl) return null;
+
+  // Handle both URL format (/uploads/profile/filename.jpg) and direct filename
+  const parts = imageUrl.split("/");
+  return parts[parts.length - 1] || null;
+};
+
+// Helper function to delete member's images
+const deleteMemberImages = async (member: any): Promise<void> => {
+  const imageDeletionPromises: Promise<boolean>[] = [];
+
+  // Delete profile image
+  if (member.photoUrl) {
+    const profileFilename = extractImageFilename(member.photoUrl);
+    if (profileFilename) {
+      imageDeletionPromises.push(
+        deleteImage(profileFilename, ImageType.PROFILE)
+      );
+    }
+  }
+
+  // Delete Document image
+  if (member.documentUrl) {
+    const documentFileName = extractImageFilename(member.documentUrl);
+    if (documentFileName) {
+      imageDeletionPromises.push(
+        deleteImage(documentFileName, ImageType.DOCUMENT)
+      );
+    }
+  }
+
+  // Delete payment-related images from payment records
+  if (member.payment && member.payment.length > 0) {
+    member.payment.forEach((payment: any) => {
+      if (payment.rentBillScreenshot) {
+        const rentBillFilename = extractImageFilename(
+          payment.rentBillScreenshot
+        );
+        if (rentBillFilename) {
+          imageDeletionPromises.push(
+            deleteImage(rentBillFilename, ImageType.PAYMENT)
+          );
+        }
+      }
+
+      if (payment.electricityBillScreenshot) {
+        const electricityBillFilename = extractImageFilename(
+          payment.electricityBillScreenshot
+        );
+        if (electricityBillFilename) {
+          imageDeletionPromises.push(
+            deleteImage(electricityBillFilename, ImageType.PAYMENT)
+          );
+        }
+      }
+    });
+  }
+
+  // Execute all image deletions
+  try {
+    await Promise.allSettled(imageDeletionPromises);
+    console.log(`Images deleted for member: ${member.memberId}`);
+  } catch (error) {
+    console.error(
+      `Error deleting images for member ${member.memberId}:`,
+      error
+    );
+    // Don't throw error - continue with member deletion even if image deletion fails
+  }
+};
+
+// Delete a single member
+export const deleteMember = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Get admin details to know their pgType
+    const admin = await prisma.admin.findUnique({
+      where: { id: req.admin.id },
+      select: { pgType: true },
+    });
+
+    if (!admin) {
+      res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const { memberId } = req.params;
+
+    // Find the member with all related data
+    const member = await prisma.member.findUnique({
+      where: { id: memberId },
+      include: {
+        pg: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            location: true,
+          },
+        },
+        room: {
+          select: {
+            id: true,
+            roomNo: true,
+          },
+        },
+        payment: {
+          select: {
+            id: true,
+            rentBillScreenshot: true,
+            electricityBillScreenshot: true,
+          },
+        },
+      },
+    });
+
+    if (!member) {
+      res.status(404).json({
+        success: false,
+        message: "Member not found",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Verify admin can delete this member (same pgType)
+    if (member.pg.type !== admin.pgType) {
+      res.status(403).json({
+        success: false,
+        message: "You can only delete members of your PG type",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Store member info for response
+    const memberInfo = {
+      memberId: member.memberId,
+      name: member.name,
+      pgName: member.pg.name,
+      roomNo: member.room?.roomNo || null,
+    };
+
+    // Delete member's images first (before database deletion)
+    await deleteMemberImages(member);
+
+    // Delete member from database (this will cascade delete payments due to schema setup)
+    await prisma.member.delete({
+      where: { id: memberId },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Member deleted successfully",
+      data: {
+        deletedMember: memberInfo,
+        deletionSummary: {
+          memberDeleted: true,
+          paymentsDeleted: member.payment.length,
+          imagesDeleted: [
+            member.photoUrl ? "profile image" : null,
+            member.documentUrl ? "document image" : null,
+            ...member.payment
+              .flatMap((p) => [
+                p.rentBillScreenshot ? "rent bill screenshot" : null,
+                p.electricityBillScreenshot
+                  ? "electricity bill screenshot"
+                  : null,
+              ])
+              .filter(Boolean),
+          ].filter(Boolean).length,
+        },
+      },
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error("Error deleting member:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: "Failed to delete member",
+    } as ApiResponse<null>);
+  }
+};
+
+// Delete multiple members
+export const deleteMultipleMembers = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Get admin details to know their pgType
+    const admin = await prisma.admin.findUnique({
+      where: { id: req.admin.id },
+      select: { pgType: true },
+    });
+
+    if (!admin) {
+      res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const { memberIds }: DeleteMultipleMembersRequest = req.body;
+
+    // Validate request body
+    if (!memberIds || !Array.isArray(memberIds) || memberIds.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid request. memberIds must be a non-empty array",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Limit the number of members that can be deleted at once
+    if (memberIds.length > 50) {
+      res.status(400).json({
+        success: false,
+        message: "Cannot delete more than 50 members at once",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Find all members with their related data
+    const members = await prisma.member.findMany({
+      where: {
+        id: { in: memberIds },
+      },
+      include: {
+        pg: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            location: true,
+          },
+        },
+        room: {
+          select: {
+            id: true,
+            roomNo: true,
+          },
+        },
+        payment: {
+          select: {
+            id: true,
+            rentBillScreenshot: true,
+            electricityBillScreenshot: true,
+          },
+        },
+      },
+    });
+
+    if (members.length === 0) {
+      res.status(404).json({
+        success: false,
+        message: "No members found with the provided IDs",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Verify admin can delete all these members (same pgType)
+    const invalidMembers = members.filter(
+      (member) => member.pg.type !== admin.pgType
+    );
+    if (invalidMembers.length > 0) {
+      res.status(403).json({
+        success: false,
+        message: "You can only delete members of your PG type",
+        error: `Cannot delete members: ${invalidMembers
+          .map((m) => m.memberId)
+          .join(", ")}`,
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Check for non-existent member IDs
+    const foundMemberIds = members.map((member) => member.id);
+    const notFoundMemberIds = memberIds.filter(
+      (id) => !foundMemberIds.includes(id)
+    );
+
+    // Store member info for response
+    const deletedMembersInfo = members.map((member) => ({
+      memberId: member.memberId,
+      name: member.name,
+      pgName: member.pg.name,
+      roomNo: member.room?.roomNo || null,
+      paymentsCount: member.payment.length,
+    }));
+
+    let totalImagesDeleted = 0;
+    let totalPaymentsDeleted = 0;
+
+    // Delete images for all members
+    const imageDeletionPromises = members.map(async (member) => {
+      await deleteMemberImages(member);
+
+      // Count images for reporting
+      let memberImagesCount = 0;
+      if (member.photoUrl) memberImagesCount++;
+      if (member.documentUrl) memberImagesCount++;
+      memberImagesCount += member.payment.reduce((count, payment) => {
+        if (payment.rentBillScreenshot) count++;
+        if (payment.electricityBillScreenshot) count++;
+        return count;
+      }, 0);
+
+      totalImagesDeleted += memberImagesCount;
+      totalPaymentsDeleted += member.payment.length;
+    });
+
+    // Execute all image deletions in parallel
+    await Promise.allSettled(imageDeletionPromises);
+
+    // Delete all members from database (this will cascade delete payments)
+    const deleteResult = await prisma.member.deleteMany({
+      where: {
+        id: { in: foundMemberIds },
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `${deleteResult.count} members deleted successfully`,
+      data: {
+        deletedMembers: deletedMembersInfo,
+        deletionSummary: {
+          totalMembersDeleted: deleteResult.count,
+          totalPaymentsDeleted,
+          totalImagesDeleted,
+          notFoundMemberIds:
+            notFoundMemberIds.length > 0 ? notFoundMemberIds : undefined,
+        },
+      },
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error("Error deleting multiple members:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: "Failed to delete members",
     } as ApiResponse<null>);
   }
 };

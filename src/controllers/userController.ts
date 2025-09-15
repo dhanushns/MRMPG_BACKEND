@@ -1,556 +1,323 @@
 import { Request, Response } from "express";
 import prisma from "../config/prisma";
-import {
-  ImageType,
-  createImageUploadResult,
-  deleteImage,
-} from "../utils/imageUpload";
-import { Gender, RentType, PgType } from "@prisma/client";
-import { PersonalDataValidation, CreateMemberRequest, SubmitPaymentRequest } from "../types/request";
+import { ApiResponse } from "../types/response";
+import { 
+  generateMemberToken, 
+  hashPassword, 
+  comparePassword, 
+  generateSecureOTP, 
+  hashOTP, 
+  verifyOTP 
+} from "../utils/auth";
+import { sendEmail } from "../utils/emailService";
 
-// Get PG location filter options for user registration
-export const getPgLocationOptions = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
-  try {
-    // Get pgType from query parameter (optional filter)
-    const pgType = req.query.pgType as PgType;
+// Enhanced request interface for member auth
+export interface AuthenticatedMemberRequest extends Request {
+  member?: {
+    id: string;
+    email: string;
+    name: string;
+    memberId: string;
+    pgType: string;
+  };
+}
 
-    // Build where clause
-    const whereClause: any = {};
-    if (pgType && Object.values(PgType).includes(pgType)) {
-      whereClause.type = pgType;
-    }
-
-    // Get all PGs with their locations
-    const pgs = await prisma.pG.findMany({
-      where: whereClause,
-      select: {
-        id: true,
-        location: true,
-        name: true,
-        type: true,
-      },
-      orderBy: [
-        { type: "asc" },
-        { location: "asc" },
-      ],
-    });
-
-    // Create options array with pgId as value and location as label
-    const options = pgs
-      .filter(pg => pg.location) // Filter out null/undefined locations
-      .map(pg => ({
-        value: pg.id,
-        label: pg.location,
-        pgName: pg.name, // Additional info for frontend
-        pgType: pg.type, // Additional info for frontend
-      }));
-
-    res.status(200).json({
-      success: true,
-      message: "PG location options retrieved successfully",
-      data: {
-        options,
-      },
-    });
-  } catch (error) {
-    console.error("Error getting PG location options:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: "Failed to retrieve PG location options",
-    });
-  }
+// OTP Email Template
+const createOTPEmailContent = (name: string, otpCode: string, isInitialSetup: boolean = false): string => {
+  const purpose = isInitialSetup ? "complete your account setup" : "login to your account";
+  const title = isInitialSetup ? "Welcome to PG Management!" : "Login OTP";
+  
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 10px; text-align: center; margin-bottom: 30px;">
+        <h1 style="color: white; margin: 0; font-size: 28px;">${title}</h1>
+      </div>
+      
+      <div style="background: #f8f9fa; padding: 30px; border-radius: 10px; margin-bottom: 20px;">
+        <p style="font-size: 18px; color: #333; margin-bottom: 20px;">
+          Hello <strong>${name}</strong>,
+        </p>
+        
+        <p style="font-size: 16px; color: #555; line-height: 1.6; margin-bottom: 25px;">
+          Your OTP code to ${purpose} is:
+        </p>
+        
+        <div style="background: #007bff; color: white; padding: 20px; border-radius: 8px; text-align: center; margin: 25px 0;">
+          <h2 style="margin: 0; font-size: 32px; letter-spacing: 3px; font-family: 'Courier New', monospace;">
+            ${otpCode}
+          </h2>
+        </div>
+        
+        <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0;">
+          <p style="margin: 0; color: #856404; font-size: 14px;">
+            <strong>⚠️ Important:</strong> This OTP will expire in 15 minutes. Do not share this code with anyone.
+          </p>
+        </div>
+        
+        ${isInitialSetup ? `
+        <div style="background: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0;">
+          <p style="margin: 0; color: #155724; font-size: 14px;">
+            <strong>📱 Next Steps:</strong> After using this OTP, you'll be asked to create a secure password for future logins.
+          </p>
+        </div>
+        ` : ''}
+      </div>
+      
+      <div style="text-align: center; padding: 20px; color: #6c757d; font-size: 14px;">
+        <p>If you didn't request this OTP, please ignore this email.</p>
+        <p>© 2025 PG Management System. All rights reserved.</p>
+      </div>
+    </div>
+  `;
 };
 
-// Get rooms based on PG ID
-export const getRoomsByPgId = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
+// Send OTP to member
+export const sendMemberOTP = async (memberId: string, type: 'LOGIN' | 'PASSWORD_RESET' | 'INITIAL_SETUP' = 'INITIAL_SETUP'): Promise<void> => {
   try {
-    // Get pgId from query parameter (required)
-    const pgId = req.query.pgId as string;
-
-    if (!pgId) {
-      res.status(400).json({
-        success: false,
-        message: "PG ID is required",
-        error: "Please provide a valid PG ID to get rooms",
-      });
-      return;
-    }
-
-    // Verify PG exists
-    const pg = await prisma.pG.findUnique({
-      where: { id: pgId },
-      select: {
-        id: true,
-        name: true,
-        location: true,
-        type: true,
-      },
-    });
-
-    if (!pg) {
-      res.status(404).json({
-        success: false,
-        message: "PG not found",
-        error: "No PG found with the provided ID",
-      });
-      return;
-    }
-
-    // Get all rooms for the specified PG
-    const rooms = await prisma.room.findMany({
-      where: { pGId: pgId },
-      select: {
-        id: true,
-        roomNo: true,
-        capacity: true,
-        rent: true,
-        _count: {
-          select: {
-            members: true, // Count current members
-          },
-        },
-      },
-      orderBy: { roomNo: "asc" },
-    });
-
-    // Create options array with roomId as value and roomNo as label
-    const options = rooms.map(room => ({
-      value: room.id,
-      label: room.roomNo,
-      capacity: room.capacity,
-      currentOccupancy: room._count.members,
-      rent: room.rent,
-      isAvailable: room._count.members < room.capacity, // Check if room has space
-    }));
-
-    res.status(200).json({
-      success: true,
-      message: "Rooms retrieved successfully",
-      data: {
-        options,
-        pgInfo: {
-          id: pg.id,
-          name: pg.name,
-          location: pg.location,
-          type: pg.type,
-        },
-      },
-    });
-  } catch (error) {
-    console.error("Error getting rooms by PG ID:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: "Failed to retrieve rooms",
-    });
-  }
-};
-
-export const validatePersonalData = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
-  try {
-    const {
-      name,
-      age,
-      gender,
-      phone,
-      email,
-      location,
-    }: PersonalDataValidation = req.body;
-
-    // Validate required fields
-    if (!name || !age || !gender || !phone || !email || !location) {
-      res.status(400).json({
-        success: false,
-        message: "All personal data fields are required",
-        error:
-          "Missing required fields: name, age, gender, phone, email, location",
-      });
-      return;
-    }
-
-    const [
-      existingMemberByPhone,
-      existingMemberByEmail,
-      existingRegMemberByPhone,
-      existingRegMemberByEmail,
-    ] = await Promise.all([
-      prisma.member.findUnique({ where: { phone: phone } }),
-      prisma.member.findUnique({ where: { email: email } }),
-      prisma.registeredMember.findUnique({
-        where: { phone: phone },
-      }),
-      prisma.registeredMember.findUnique({
-        where: { email: email },
-      }),
-    ]);
-
-    // Check for conflicts and clean up images if any found
-    if (existingMemberByPhone || existingRegMemberByPhone) {
-      res.status(409).json({
-        success: false,
-        message: "Phone number already exists",
-        error: "A member or registration with this phone number already exists",
-        field: "phone",
-      });
-      return;
-    }
-
-    if (existingMemberByEmail || existingRegMemberByEmail) {
-      res.status(409).json({
-        success: false,
-        message: "Email already exists",
-        error: "A member or registration with this email already exists",
-        field: "email",
-      });
-      return;
-    }
-
-    // If validation passes, return success
-    res.status(200).json({
-      success: true,
-      message: "Personal data validation successful",
-      data: {
-        name,
-        age,
-        gender,
-        phone,
-        location,
-      },
-    });
-  } catch (error) {
-    console.error("Error validating personal data:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: "Failed to validate personal data",
-    });
-  }
-};
-
-export const completeRegistration = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
-  try {
-    // Extract files from multer
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const profileImage = files?.profileImage?.[0];
-    const aadharImage = files?.aadharImage?.[0];
-
-    // Parse the registration data from form data
-    const registrationData: CreateMemberRequest = {
-      name: req.body.name,
-      age: parseInt(req.body.age),
-      gender: req.body.gender as Gender,
-      phone: req.body.phone,
-      location: req.body.location,
-      email: req.body.email,
-      work: req.body.work,
-      pgLocation: req.body.pgLocation,
-      rentType: req.body.rentType as RentType,
-      pgType: req.body.pgType as PgType,
-    };
-
-    // Validate required fields
-    const requiredFields = [
-      "name",
-      "age",
-      "gender",
-      "phone",
-      "location",
-      "work",
-      "email",
-      "pgLocation",
-      "rentType",
-      "pgType",
-    ];
-    const missingFields = requiredFields.filter(
-      (field) => !registrationData[field as keyof CreateMemberRequest]
-    );
-
-    if (missingFields.length > 0) {
-      // Clean up uploaded files if validation fails
-      if (profileImage)
-        await deleteImage(profileImage.filename, ImageType.PROFILE);
-      if (aadharImage)
-        await deleteImage(aadharImage.filename, ImageType.AADHAR);
-
-      res.status(400).json({
-        success: false,
-        message: "Missing required fields",
-        error: `Required fields missing: ${missingFields.join(", ")}`,
-      });
-      return;
-    }
-
-    // Check if both images are provided
-    if (!profileImage || !aadharImage) {
-      // Clean up any uploaded files
-      if (profileImage)
-        await deleteImage(profileImage.filename, ImageType.PROFILE);
-      if (aadharImage)
-        await deleteImage(aadharImage.filename, ImageType.AADHAR);
-
-      res.status(400).json({
-        success: false,
-        message: "Both profile and aadhar images are required",
-        error: "Please upload both profile image and aadhar image",
-      });
-      return;
-    }
-
-    // Check if the pgLocation and pgType correspond to an existing PG
-    const existingPG = await prisma.pG.findFirst({
-      where: {
-        location: registrationData.pgLocation,
-        type: registrationData.pgType,
-      },
-    });
-
-    if (!existingPG) {
-      // Clean up uploaded files if PG validation fails
-      if (profileImage)
-        await deleteImage(profileImage.filename, ImageType.PROFILE);
-      if (aadharImage)
-        await deleteImage(aadharImage.filename, ImageType.AADHAR);
-
-      res.status(400).json({
-        success: false,
-        message: "Invalid PG location or type",
-        error: "The specified PG location and type do not match any existing PG",
-      });
-      return;
-    }
-
-    // Re-check for duplicate records
-     const [
-      existingMemberByPhone,
-      existingMemberByEmail,
-      existingRegMemberByPhone,
-      existingRegMemberByEmail,
-    ] = await Promise.all([
-      prisma.member.findUnique({ where: { phone: registrationData.phone } }),
-      prisma.member.findUnique({ where: { email: registrationData.email } }),
-      prisma.registeredMember.findUnique({
-        where: { phone: registrationData.phone },
-      }),
-      prisma.registeredMember.findUnique({
-        where: { email: registrationData.   email },
-      }),
-    ]);
-
-    // Check for conflicts and clean up images if any found
-    if (existingMemberByPhone || existingRegMemberByPhone) {
-      res.status(409).json({
-        success: false,
-        message: "Phone number already exists",
-        error: "A member or registration with this phone number already exists",
-        field: "phone",
-      });
-      return;
-    }
-
-    if (existingMemberByEmail || existingRegMemberByEmail) {
-      res.status(409).json({
-        success: false,
-        message: "Email already exists",
-        error: "A member or registration with this email already exists",
-        field: "email",
-      });
-      return;
-    }
-
-    // Create image upload results
-    const profileImageResult = createImageUploadResult(
-      profileImage,
-      ImageType.PROFILE
-    );
-    const aadharImageResult = createImageUploadResult(
-      aadharImage,
-      ImageType.AADHAR
-    );
-
-    // Create new registered member record
-    const newRegisteredMember = await prisma.registeredMember.create({
-      data: {
-        name: registrationData.name,
-        age: registrationData.age,
-        gender: registrationData.gender,
-        location: registrationData.location,
-        pgLocation: registrationData.pgLocation,
-        work: registrationData.work,
-        email: registrationData.email,
-        phone: registrationData.phone,
-        photoUrl: profileImageResult.url,
-        aadharUrl: aadharImageResult.url,
-        rentType: registrationData.rentType,
-        pgType: registrationData.pgType,
-      },
-    });
-
-    res.status(201).json({
-      success: true,
-      message: "Registration completed successfully",
-      data: {
-        member: newRegisteredMember,
-        images: {
-          profile: profileImageResult,
-          aadhar: aadharImageResult,
-        },
-      },
-    });
-  } catch (error) {
-    console.error("Error completing registration:", error);
-
-    // Clean up uploaded files on error
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const profileImage = files?.profileImage?.[0];
-    const aadharImage = files?.aadharImage?.[0];
-
-    if (profileImage)
-      await deleteImage(profileImage.filename, ImageType.PROFILE);
-    if (aadharImage) await deleteImage(aadharImage.filename, ImageType.AADHAR);
-
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: "Failed to complete registration",
-    });
-  }
-};
-
-export const submitPayment = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
-  try {
-    // Extract files from multer
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const rentBillImage = files?.rentBillScreenshot?.[0];
-    const electricityBillImage = files?.electricityBillScreenshot?.[0];
-
-    // Parse the payment data from form data
-    const paymentData: SubmitPaymentRequest = {
-      name: req.body.name,
-      memberId: req.body.memberId,
-      roomId: req.body.roomId,
-      pgId: req.body.pgId,
-    };
-
-    // Validate required fields
-    const requiredFields = ["name", "memberId", "roomId", "pgId"];
-    const missingFields = requiredFields.filter(
-      (field) => !paymentData[field as keyof SubmitPaymentRequest]
-    );
-
-    if (missingFields.length > 0) {
-      // Clean up uploaded files if validation fails
-      if (rentBillImage)
-        await deleteImage(rentBillImage.filename, ImageType.PAYMENT);
-      if (electricityBillImage)
-        await deleteImage(electricityBillImage.filename, ImageType.PAYMENT);
-
-      res.status(400).json({
-        success: false,
-        message: "Missing required fields",
-        error: `Required fields missing: ${missingFields.join(", ")}`,
-      });
-      return;
-    }
-
-    // Check if both images are provided
-    if (!rentBillImage || !electricityBillImage) {
-      // Clean up any uploaded files
-      if (rentBillImage)
-        await deleteImage(rentBillImage.filename, ImageType.PAYMENT);
-      if (electricityBillImage)
-        await deleteImage(electricityBillImage.filename, ImageType.PAYMENT);
-
-      res.status(400).json({
-        success: false,
-        message: "Both rent bill and electricity bill screenshots are required",
-        error: "Please upload both rent bill and electricity bill screenshots",
-      });
-      return;
-    }
-
-    // Validate that the provided PG and Room exist and are related
-    const [pg, room] = await Promise.all([
-      prisma.pG.findUnique({
-        where: { id: paymentData.pgId },
-        select: { id: true, name: true, location: true, type: true },
-      }),
-      prisma.room.findUnique({
-        where: { id: paymentData.roomId },
-        select: { id: true, roomNo: true, rent: true, pGId: true },
-      }),
-    ]);
-
-    if (!pg) {
-      // Clean up uploaded files if PG not found
-      if (rentBillImage)
-        await deleteImage(rentBillImage.filename, ImageType.PAYMENT);
-      if (electricityBillImage)
-        await deleteImage(electricityBillImage.filename, ImageType.PAYMENT);
-
-      res.status(404).json({
-        success: false,
-        message: "PG not found",
-        error: "No PG found with the provided PG ID",
-      });
-      return;
-    }
-
-    if (!room) {
-      // Clean up uploaded files if room not found
-      if (rentBillImage)
-        await deleteImage(rentBillImage.filename, ImageType.PAYMENT);
-      if (electricityBillImage)
-        await deleteImage(electricityBillImage.filename, ImageType.PAYMENT);
-
-      res.status(404).json({
-        success: false,
-        message: "Room not found",
-        error: "No room found with the provided room ID",
-      });
-      return;
-    }
-
-    // Validate that the room belongs to the specified PG
-    if (room.pGId !== paymentData.pgId) {
-      // Clean up uploaded files if room-PG mismatch
-      if (rentBillImage)
-        await deleteImage(rentBillImage.filename, ImageType.PAYMENT);
-      if (electricityBillImage)
-        await deleteImage(electricityBillImage.filename, ImageType.PAYMENT);
-
-      res.status(400).json({
-        success: false,
-        message: "Room and PG mismatch",
-        error: "The provided room does not belong to the specified PG",
-      });
-      return;
-    }
-
-    // Find the member by memberId
     const member = await prisma.member.findUnique({
-      where: { memberId: paymentData.memberId },
+      where: { id: memberId },
+    });
+
+    if (!member) {
+      throw new Error('Member not found');
+    }
+
+    // Generate OTP
+    const otpCode = generateSecureOTP();
+    const hashedOTP = await hashOTP(otpCode);
+
+    // Delete existing unused OTPs for this member of the same type
+    await prisma.oTP.deleteMany({
+      where: {
+        memberId: member.id,
+        type: type,
+      },
+    });
+
+    // Create new OTP
+    await prisma.oTP.create({
+      data: {
+        memberId: member.id,
+        email: member.email,
+        code: hashedOTP,
+        type: type,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000), // 15 minutes
+      },
+    });
+
+    // Send OTP email
+    const emailContent = createOTPEmailContent(
+      member.name, 
+      otpCode, 
+      type === 'INITIAL_SETUP'
+    );
+    
+    await sendEmail({
+      to: member.email,
+      subject: type === 'INITIAL_SETUP' 
+        ? `🔐 Account Setup OTP - ${member.name}`
+        : `🔐 Login OTP - ${member.name}`,
+      body: emailContent,
+    });
+
+    console.log(`OTP sent to member: ${member.email} (Type: ${type})`);
+  } catch (error) {
+    console.error('Error sending member OTP:', error);
+    throw error;
+  }
+};
+
+// Verify OTP without logging in
+export const verifyMemberOTP = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email, otp } = req.body;
+
+    // Validate input
+    if (!email || !otp) {
+      res.status(400).json({
+        success: false,
+        message: 'Email and OTP are required',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Find member
+    const member = await prisma.member.findUnique({
+      where: { email },
+    });
+
+    if (!member) {
+      res.status(404).json({
+        success: false,
+        message: 'Member not found',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Check if member is active
+    if (!member.isActive) {
+      res.status(403).json({
+        success: false,
+        message: 'Member account is inactive. Please contact admin.',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Find valid OTP
+    const otpRecord = await prisma.oTP.findFirst({
+      where: {
+        memberId: member.id,
+        email: member.email,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!otpRecord) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP. Please request a new one.',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Verify OTP
+    const isOTPValid = await verifyOTP(otp, otpRecord.code);
+
+    if (!isOTPValid) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid OTP code',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Delete the used OTP
+    await prisma.oTP.delete({
+      where: { id: otpRecord.id },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'OTP verification successful',
+      data: {
+        email: member.email,
+        verified: true,
+        otpType: otpRecord.type,
+      },
+    } as ApiResponse<any>);
+
+  } catch (error) {
+    console.error('OTP verification error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+};
+
+// Member password setup (after first OTP login)
+export const setupMemberPassword = async (req: AuthenticatedMemberRequest, res: Response): Promise<void> => {
+  try {
+    const { password, confirmPassword } = req.body;
+    const memberId = req.member?.id;
+
+    // Validate input
+    if (!password || !confirmPassword) {
+      res.status(400).json({
+        success: false,
+        message: 'Password and confirmation are required',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      res.status(400).json({
+        success: false,
+        message: 'Passwords do not match',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Password strength validation
+    if (password.length < 6) {
+      res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters long',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Find member
+    const member = await prisma.member.findUnique({
+      where: { id: memberId },
+    });
+
+    if (!member) {
+      res.status(404).json({
+        success: false,
+        message: 'Member not found',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Check if it's first time login
+    if (!member.isFirstTimeLogin) {
+      res.status(400).json({
+        success: false,
+        message: 'Password has already been set up',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Hash password
+    const hashedPassword = await hashPassword(password);
+
+    // Update member
+    await prisma.member.update({
+      where: { id: memberId },
+      data: {
+        password: hashedPassword,
+        isFirstTimeLogin: false,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Password set up successfully. You can now login with your email and password.',
+    } as ApiResponse<null>);
+
+  } catch (error) {
+    console.error('Password setup error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+};
+
+// Unified member login (handles both first-time OTP login and regular password login)
+export const memberLogin = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email, password } = req.body;
+
+    // Validate input
+    if (!email || !password) {
+      res.status(400).json({
+        success: false,
+        message: 'Email and password/OTP are required',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Find member
+    const member = await prisma.member.findUnique({
+      where: { email },
       include: {
         pg: {
           select: {
             id: true,
             name: true,
-            type: true,
             location: true,
           },
         },
@@ -565,37 +332,619 @@ export const submitPayment = async (
     });
 
     if (!member) {
-      // Clean up uploaded files if member not found
-      if (rentBillImage)
-        await deleteImage(rentBillImage.filename, ImageType.PAYMENT);
-      if (electricityBillImage)
-        await deleteImage(electricityBillImage.filename, ImageType.PAYMENT);
-
-      res.status(404).json({
+      res.status(401).json({
         success: false,
-        message: "Member not found",
-        error: "No member found with the provided member ID",
-      });
+        message: 'Invalid email or credentials',
+      } as ApiResponse<null>);
       return;
     }
 
-    // Validate member details match the provided data
-    if (
-      member.name.toLowerCase() !== paymentData.name.toLowerCase() ||
-      member.pg.id !== paymentData.pgId ||
-      member.room?.id !== paymentData.roomId
-    ) {
-      // Clean up uploaded files if validation fails
-      if (rentBillImage)
-        await deleteImage(rentBillImage.filename, ImageType.PAYMENT);
-      if (electricityBillImage)
-        await deleteImage(electricityBillImage.filename, ImageType.PAYMENT);
+    // Check if member is active
+    if (!member.isActive) {
+      res.status(403).json({
+        success: false,
+        message: 'Member account is inactive. Please contact admin.',
+      } as ApiResponse<null>);
+      return;
+    }
 
+    let isLoginSuccessful = false;
+    let loginMethod = '';
+    let requirePasswordSetup = false;
+
+    // Check if this is first-time login (should use OTP)
+    if (member.isFirstTimeLogin) {
+      // For first-time users, treat the 'password' field as OTP
+      const otp = password;
+
+      // Validate OTP format (6 digits)
+      if (!/^\d{6}$/.test(otp)) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid OTP format. OTP must be 6 digits.',
+        } as ApiResponse<null>);
+        return;
+      }
+
+      // Find valid OTP for this member
+      const otpRecord = await prisma.oTP.findFirst({
+        where: {
+          memberId: member.id,
+          email: member.email,
+          type: 'INITIAL_SETUP',
+          expiresAt: { gt: new Date() },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (!otpRecord) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid or expired OTP. Please request a new one or contact support.',
+        } as ApiResponse<null>);
+        return;
+      }
+
+      // Verify OTP
+      const isOTPValid = await verifyOTP(otp, otpRecord.code);
+
+      if (!isOTPValid) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid OTP code',
+        } as ApiResponse<null>);
+        return;
+      }
+
+      // OTP is valid - delete the used OTP
+      await prisma.oTP.delete({
+        where: { id: otpRecord.id },
+      });
+
+      isLoginSuccessful = true;
+      loginMethod = 'OTP';
+      requirePasswordSetup = true;
+
+    } else {
+      // For returning users, use regular password authentication
+      if (!member.password) {
+        res.status(400).json({
+          success: false,
+          message: 'Account setup incomplete. Please contact support.',
+        } as ApiResponse<null>);
+        return;
+      }
+
+      // Verify password
+      const isPasswordValid = await comparePassword(password, member.password);
+
+      if (!isPasswordValid) {
+        res.status(401).json({
+          success: false,
+          message: 'Invalid email or password',
+        } as ApiResponse<null>);
+        return;
+      }
+
+      isLoginSuccessful = true;
+      loginMethod = 'PASSWORD';
+      requirePasswordSetup = false;
+    }
+
+    // If login successful, generate token and return response
+    if (isLoginSuccessful) {
+      const token = generateMemberToken({
+        id: member.id,
+        email: member.email,
+        name: member.name,
+        memberId: member.memberId,
+        pgType: member.pgType,
+      });
+
+      res.status(200).json({
+        success: true,
+        message: loginMethod === 'OTP' 
+          ? 'OTP verification successful. Please set up your password.' 
+          : 'Login successful',
+        data: {
+          token,
+          member: {
+            id: member.id,
+            name: member.name,
+            email: member.email,
+            memberId: member.memberId,
+            pgType: member.pgType,
+            pg: member.pg,
+            room: member.room,
+            isFirstTimeLogin: member.isFirstTimeLogin,
+          },
+          loginMethod,
+          requirePasswordSetup,
+          ...(loginMethod === 'OTP' && {
+            nextStep: 'password_setup',
+            message_detail: 'You must set up a password before accessing your account fully.'
+          }),
+        },
+      } as ApiResponse<any>);
+    }
+
+  } catch (error) {
+    console.error('Member login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+};
+
+// Request new OTP
+export const requestNewOTP = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email, type = 'INITIAL_SETUP' } = req.body;
+
+    if (!email) {
       res.status(400).json({
         success: false,
-        message: "Member details do not match",
-        error: "The provided member details do not match our records",
+        message: 'Email is required',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const member = await prisma.member.findUnique({
+      where: { email },
+    });
+
+    if (!member) {
+      res.status(404).json({
+        success: false,
+        message: 'Member not found',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    if (!member.isActive) {
+      res.status(403).json({
+        success: false,
+        message: 'Member account is inactive',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Validate OTP type based on member status
+    if (type === 'INITIAL_SETUP' && !member.isFirstTimeLogin) {
+      res.status(400).json({
+        success: false,
+        message: 'Account setup is already completed',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    if (type === 'LOGIN' && member.isFirstTimeLogin) {
+      res.status(400).json({
+        success: false,
+        message: 'Please complete initial setup first',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    await sendMemberOTP(member.id, type as any);
+
+    res.status(200).json({
+      success: true,
+      message: `New ${type.toLowerCase().replace('_', ' ')} OTP sent successfully`,
+    } as ApiResponse<null>);
+
+  } catch (error) {
+    console.error('Request OTP error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+};
+
+// Change password (for logged-in members)
+export const changeMemberPassword = async (req: AuthenticatedMemberRequest, res: Response): Promise<void> => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    const memberId = req.member?.id;
+
+    // Validate input
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      res.status(400).json({
+        success: false,
+        message: 'All password fields are required',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      res.status(400).json({
+        success: false,
+        message: 'New passwords do not match',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      res.status(400).json({
+        success: false,
+        message: 'New password must be at least 6 characters long',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const member = await prisma.member.findUnique({
+      where: { id: memberId },
+    });
+
+    if (!member || !member.password) {
+      res.status(404).json({
+        success: false,
+        message: 'Member not found or password not set',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = await comparePassword(currentPassword, member.password);
+
+    if (!isCurrentPasswordValid) {
+      res.status(400).json({
+        success: false,
+        message: 'Current password is incorrect',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Hash new password
+    const hashedNewPassword = await hashPassword(newPassword);
+
+    // Update password
+    await prisma.member.update({
+      where: { id: memberId },
+      data: {
+        password: hashedNewPassword,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Password changed successfully',
+    } as ApiResponse<null>);
+
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+};
+
+// Reset password (after OTP verification)
+export const resetMemberPassword = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email, newPassword, confirmPassword } = req.body;
+
+    // Validate input
+    if (!email || !newPassword || !confirmPassword) {
+      res.status(400).json({
+        success: false,
+        message: 'Email, new password, and confirm password are required',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      res.status(400).json({
+        success: false,
+        message: 'Passwords do not match',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters long',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Find member
+    const member = await prisma.member.findUnique({
+      where: { email },
+    });
+
+    if (!member) {
+      res.status(404).json({
+        success: false,
+        message: 'Member not found',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Check if member is active
+    if (!member.isActive) {
+      res.status(403).json({
+        success: false,
+        message: 'Member account is inactive. Please contact admin.',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Hash new password
+    const hashedPassword = await hashPassword(newPassword);
+
+    // Update member password
+    await prisma.member.update({
+      where: { id: member.id },
+      data: {
+        password: hashedPassword,
+        isFirstTimeLogin: false, // Ensure it's not first time login anymore
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset successfully',
+    } as ApiResponse<null>);
+
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+};
+
+// Request password reset OTP
+export const requestPasswordResetOTP = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      res.status(400).json({
+        success: false,
+        message: 'Email is required',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const member = await prisma.member.findUnique({
+      where: { email },
+    });
+
+    if (!member) {
+      // Don't reveal if email exists or not for security
+      res.status(200).json({
+        success: true,
+        message: 'If the email exists, a password reset OTP has been sent',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    if (!member.isActive) {
+      res.status(403).json({
+        success: false,
+        message: 'Member account is inactive',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    await sendMemberOTP(member.id, 'PASSWORD_RESET');
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset OTP sent successfully',
+    } as ApiResponse<null>);
+
+  } catch (error) {
+    console.error('Request password reset OTP error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+};
+
+// Get member profile
+export const getMemberProfile = async (req: AuthenticatedMemberRequest, res: Response): Promise<void> => {
+  try {
+    const memberId = req.member?.id;
+
+    const member = await prisma.member.findUnique({
+      where: { id: memberId },
+      include: {
+        pg: {
+          select: {
+            id: true,
+            name: true,
+            location: true,
+          },
+        },
+        room: {
+          select: {
+            id: true,
+            roomNo: true,
+            rent: true,
+            capacity: true,
+          },
+        },
+      },
+    });
+
+    if (!member) {
+      res.status(404).json({
+        success: false,
+        message: 'Member not found',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Format the response according to the new structure
+    const profileData = {
+      pgDetails: {
+        pgName: member.pg?.name || 'N/A',
+        roomNumber: member.room?.roomNo || 'Not assigned',
+        pgLocation: member.pg?.location || 'N/A',
+        dateOfJoining: member.dateOfJoining,
+        monthlyRent: member.room?.rent || 0,
+        advanceAmount: member.advanceAmount,
+      },
+      personalInfo: {
+        name: member.name,
+        age: member.age,
+        gender: member.gender,
+        workType: member.work,
+      },
+      contactInfo: {
+        phoneNo: member.phone,
+        email: member.email,
+        location: member.location,
+      },
+    };
+
+    res.status(200).json({
+      success: true,
+      message: 'Member profile retrieved successfully',
+      data: profileData,
+    } as ApiResponse<any>);
+
+  } catch (error) {
+    console.error('Get member profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+};
+
+// Update member profile
+export const updateMemberProfile = async (req: AuthenticatedMemberRequest, res: Response): Promise<void> => {
+  try {
+    const memberId = req.member?.id;
+    const { name, age, phone, location, work } = req.body;
+
+    if (!memberId) {
+      res.status(401).json({
+        success: false,
+        message: 'Unauthorized',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Check if member exists
+    const existingMember = await prisma.member.findUnique({
+      where: { id: memberId },
+    });
+
+    if (!existingMember) {
+      res.status(404).json({
+        success: false,
+        message: 'Member not found',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Check if phone number already exists (if phone is being updated)
+    if (phone && phone !== existingMember.phone) {
+      const existingPhoneMember = await prisma.member.findUnique({
+        where: { phone },
       });
+
+      if (existingPhoneMember) {
+        res.status(400).json({
+          success: false,
+          message: 'Phone number already exists with another member',
+        } as ApiResponse<null>);
+        return;
+      }
+    }
+
+    // Build update data object with only provided fields
+    const updateData: any = {};
+    if (name !== undefined) updateData.name = name.trim();
+    if (age !== undefined) updateData.age = age;
+    if (phone !== undefined) updateData.phone = phone;
+    if (location !== undefined) updateData.location = location.trim();
+    if (work !== undefined) updateData.work = work.trim();
+
+    // Update member profile
+    const updatedMember = await prisma.member.update({
+      where: { id: memberId },
+      data: updateData,
+      include: {
+        pg: {
+          select: {
+            id: true,
+            name: true,
+            location: true,
+          },
+        },
+        room: {
+          select: {
+            id: true,
+            roomNo: true,
+            rent: true,
+            capacity: true,
+          },
+        },
+      },
+    });
+
+    // Format the response according to the profile structure
+    const profileData = {
+      pgDetails: {
+        pgName: updatedMember.pg?.name || 'N/A',
+        roomNumber: updatedMember.room?.roomNo || 'Not assigned',
+        pgLocation: updatedMember.pg?.location || 'N/A',
+        dateOfJoining: updatedMember.dateOfJoining,
+        monthlyRent: updatedMember.room?.rent || 0,
+        advanceAmount: updatedMember.advanceAmount,
+      },
+      personalInfo: {
+        name: updatedMember.name,
+        age: updatedMember.age,
+        gender: updatedMember.gender,
+        workType: updatedMember.work,
+      },
+      contactInfo: {
+        phoneNo: updatedMember.phone,
+        email: updatedMember.email,
+        location: updatedMember.location,
+      },
+    };
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: profileData,
+    } as ApiResponse<any>);
+
+  } catch (error) {
+    console.error('Update member profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+};
+
+/**
+ * Get current month overview for member
+ */
+export const getCurrentMonthOverview = async (req: AuthenticatedMemberRequest, res: Response): Promise<void> => {
+  try {
+    const memberId = req.member?.id;
+
+    if (!memberId) {
+      res.status(401).json({
+        success: false,
+        message: 'Unauthorized - Member not found',
+      } as ApiResponse<null>);
       return;
     }
 
@@ -604,184 +953,94 @@ export const submitPayment = async (
     const currentMonth = now.getMonth() + 1;
     const currentYear = now.getFullYear();
 
-    // Calculate due date and overdue date based on member's joining date
-    const memberJoiningDate = new Date(member.dateOfJoining);
-    const paymentDueDay = memberJoiningDate.getDate();
-    const dueDate = new Date(currentYear, currentMonth - 1, paymentDueDay);
-    const overdueDate = new Date(dueDate);
-    overdueDate.setDate(overdueDate.getDate() + 5);
-
-    // Check if there's an existing payment record for current month
-    const existingPayment = await prisma.payment.findFirst({
-      where: {
-        memberId: member.id,
-        month: currentMonth,
-        year: currentYear,
-      },
+    // Get member details with room and payment info
+    const member = await prisma.member.findUnique({
+      where: { id: memberId },
+      include: {
+        room: true,
+        pg: {
+          select: {
+            name: true,
+            location: true,
+          }
+        },
+        payment: {
+          where: {
+            month: currentMonth,
+            year: currentYear,
+          },
+          orderBy: {
+            createdAt: 'desc'
+          },
+          take: 1,
+        }
+      }
     });
 
-    let paymentRecord;
-
-    if (existingPayment) {
-      // Handle existing payment record based on approval status
-      if (existingPayment.approvalStatus === "APPROVED") {
-        // Clean up uploaded files if payment already approved
-        if (rentBillImage)
-          await deleteImage(rentBillImage.filename, ImageType.PAYMENT);
-        if (electricityBillImage)
-          await deleteImage(electricityBillImage.filename, ImageType.PAYMENT);
-
-        res.status(400).json({
-          success: false,
-          message: "Payment already approved",
-          error: "Payment for this month has already been approved by admin",
-        });
-        return;
-      }
-
-      if (existingPayment.approvalStatus === "PENDING") {
-        // Clean up uploaded files if payment is pending approval
-        if (rentBillImage)
-          await deleteImage(rentBillImage.filename, ImageType.PAYMENT);
-        if (electricityBillImage)
-          await deleteImage(electricityBillImage.filename, ImageType.PAYMENT);
-
-        res.status(400).json({
-          success: false,
-          message: "Payment already submitted",
-          error: "Payment already done and waiting for admin approval",
-        });
-        return;
-      }
-
-      if (existingPayment.approvalStatus === "REJECTED") {
-        // Create image upload results for rejected payment retry
-        const rentBillResult = createImageUploadResult(
-          rentBillImage,
-          ImageType.PAYMENT
-        );
-        const electricityBillResult = createImageUploadResult(
-          electricityBillImage,
-          ImageType.PAYMENT
-        );
-
-        // Update the existing payment record with new payment data
-        paymentRecord = await prisma.payment.update({
-          where: { id: existingPayment.id },
-          data: {
-            paymentStatus: "PAID",
-            approvalStatus: "PENDING", // Reset to pending for re-approval
-            rentBillScreenshot: rentBillResult.url,
-            electricityBillScreenshot: electricityBillResult.url,
-            paidDate: now,
-            attemptNumber: existingPayment.attemptNumber + 1,
-            updatedAt: now,
-          },
-          include: {
-            member: {
-              select: {
-                id: true,
-                memberId: true,
-                name: true,
-                email: true,
-                phone: true,
-              },
-            },
-            pg: {
-              select: {
-                id: true,
-                name: true,
-                location: true,
-              },
-            },
-          },
-        });
-      }
-    } else {
-      // Create image upload results for new payment
-      const rentBillResult = createImageUploadResult(
-        rentBillImage,
-        ImageType.PAYMENT
-      );
-      const electricityBillResult = createImageUploadResult(
-        electricityBillImage,
-        ImageType.PAYMENT
-      );
-
-      // Create a new payment record
-      paymentRecord = await prisma.payment.create({
-        data: {
-          memberId: member.id,
-          pgId: member.pg.id,
-          amount: member.room?.rent || 0,
-          month: currentMonth,
-          year: currentYear,
-          dueDate: dueDate,
-          overdueDate: overdueDate,
-          paymentStatus: "PAID",
-          approvalStatus: "PENDING",
-          rentBillScreenshot: rentBillResult.url,
-          electricityBillScreenshot: electricityBillResult.url,
-          paidDate: now,
-          attemptNumber: 1,
-        },
-        include: {
-          member: {
-            select: {
-              id: true,
-              memberId: true,
-              name: true,
-              email: true,
-              phone: true,
-            },
-          },
-          pg: {
-            select: {
-              id: true,
-              name: true,
-              location: true,
-            },
-          },
-        },
-      });
+    if (!member) {
+      res.status(404).json({
+        success: false,
+        message: 'Member not found',
+      } as ApiResponse<null>);
+      return;
     }
 
-    const messageText = existingPayment && existingPayment.approvalStatus === "REJECTED" 
-      ? "Payment resubmitted successfully" 
-      : "Payment submitted successfully";
+    if (!member.room) {
+      res.status(400).json({
+        success: false,
+        message: 'Room not assigned to member',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Calculate rent amount based on rent type
+    let rentAmount = 0;
+    if (member.rentType === 'LONG_TERM') {
+      rentAmount = member.room.rent;
+    } else if (member.rentType === 'SHORT_TERM' && member.pricePerDay) {
+      // For daily rent, calculate based on days in current month
+      const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+      rentAmount = member.pricePerDay * daysInMonth;
+    }
+
+    // Get electricity bill amount
+    const electricityBillAmount = member.room.electricityCharge;
+
+    // Get payment details if exists
+    const currentPayment = member.payment[0];
+    
+    const overviewData = {
+      currentMonth: {
+        month: currentMonth,
+        year: currentYear,
+        monthName: new Date(currentYear, currentMonth - 1).toLocaleString('default', { month: 'long' }),
+      },
+      billing: {
+        rentAmount,
+        electricityBillAmount,
+        totalAmount: rentAmount + electricityBillAmount,
+      },
+      paymentInfo: {
+        paymentStatus: currentPayment.paymentStatus,
+        dueDate: currentPayment.dueDate,
+      },
+      isOverdue: currentPayment ? (
+        currentPayment.paymentStatus !== 'PAID' && 
+        new Date() > new Date(currentPayment.overdueDate)
+      ) : false,
+    };
 
     res.status(200).json({
       success: true,
-      message: messageText,
-      data: {
-        payment: paymentRecord,
-        images: {
-          rentBill: {
-            url: paymentRecord?.rentBillScreenshot,
-          },
-          electricityBill: {
-            url: paymentRecord?.electricityBillScreenshot,
-          },
-        },
-      },
-    });
+      message: 'Current month overview retrieved successfully',
+      data: overviewData,
+    } as ApiResponse<typeof overviewData>);
+
   } catch (error) {
-    console.error("Error submitting payment:", error);
-
-    // Clean up uploaded files on error
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const rentBillImage = files?.rentBillScreenshot?.[0];
-    const electricityBillImage = files?.electricityBillScreenshot?.[0];
-
-    if (rentBillImage)
-      await deleteImage(rentBillImage.filename, ImageType.PAYMENT);
-    if (electricityBillImage)
-      await deleteImage(electricityBillImage.filename, ImageType.PAYMENT);
-
+    console.error('Get current month overview error:', error);
     res.status(500).json({
       success: false,
-      message: "Internal server error",
-      error: "Failed to submit payment",
-    });
+      message: 'Internal server error',
+    } as ApiResponse<null>);
   }
 };

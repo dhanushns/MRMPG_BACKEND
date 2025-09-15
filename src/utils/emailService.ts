@@ -196,7 +196,20 @@ export const sendEmail = async (options: EmailOptions): Promise<boolean> => {
 };
 
 // Predefined email templates for member approval/rejection
-export const createApprovalEmailContent = (memberName: string, memberId: string, pgName: string, pgLocation: string, roomNo?: string, rentAmount?: number, advanceAmount?: number, dateOfJoining?: Date) => {
+export const createApprovalEmailContent = (
+  memberName: string, 
+  memberId: string, 
+  pgName: string, 
+  pgLocation: string, 
+  roomNo?: string, 
+  rentAmount?: number, 
+  advanceAmount?: number, 
+  dateOfJoining?: Date,
+  rentType?: 'LONG_TERM' | 'SHORT_TERM',
+  pricePerDay?: number,
+  dateOfRelieving?: Date,
+  otpCode?: string // New parameter for OTP code
+) => {
   // Format the date of joining
   const formatDate = (date?: Date) => {
     if (!date) return new Date().toLocaleDateString('en-US', { 
@@ -217,6 +230,20 @@ export const createApprovalEmailContent = (memberName: string, memberId: string,
     return `₹${amount.toLocaleString('en-IN')}`;
   };
 
+  // Calculate total amount for short-term members
+  const calculateShortTermTotal = () => {
+    if (rentType === 'SHORT_TERM' && pricePerDay && dateOfJoining && dateOfRelieving) {
+      const joiningDateObj = new Date(dateOfJoining);
+      const endingDateObj = new Date(dateOfRelieving);
+      const timeDifference = endingDateObj.getTime() - joiningDateObj.getTime();
+      const numberOfDays = Math.ceil(timeDifference / (1000 * 3600 * 24));
+      return numberOfDays * pricePerDay;
+    }
+    return 0;
+  };
+
+  const shortTermTotal = calculateShortTermTotal();
+
   return `
     <h2>🎉 Congratulations! Your Application Has Been Approved</h2>
     
@@ -229,20 +256,24 @@ export const createApprovalEmailContent = (memberName: string, memberId: string,
         <p><strong>Member ID:</strong> ${memberId}</p>
         <p><strong>PG Name:</strong> ${pgName}</p>
         <p><strong>PG Location:</strong> ${pgLocation}</p>
+        <p><strong>Rent Type:</strong> ${rentType === 'SHORT_TERM' ? 'Short Term' : 'Long Term'}</p>
         ${roomNo ? `<p><strong>Room Number:</strong> ${roomNo}</p>` : '<p><strong>Room:</strong> Will be assigned soon</p>'}
-        ${roomNo && rentAmount ? `<p><strong>Monthly Rent:</strong> ${formatCurrency(rentAmount)}</p>` : ''}
+        ${rentType === 'LONG_TERM' && roomNo && rentAmount ? `<p><strong>Monthly Rent:</strong> ${formatCurrency(rentAmount)}</p>` : ''}
+        ${rentType === 'SHORT_TERM' && pricePerDay ? `<p><strong>Daily Rate:</strong> ${formatCurrency(pricePerDay)}</p>` : ''}
         ${advanceAmount ? `<p><strong>Advance Amount:</strong> ${formatCurrency(advanceAmount)}</p>` : ''}
         <p><strong>Date of Joining:</strong> ${formatDate(dateOfJoining)}</p>
+        ${rentType === 'SHORT_TERM' && dateOfRelieving ? `<p><strong>Stay Until:</strong> ${formatDate(dateOfRelieving)}</p>` : ''}
         <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">Approved ✅</span></p>
     </div>
     
     <p>Your journey with us begins now! Please keep your Member ID safe as you'll need it for all future communications and transactions.</p>
     
     <div class="highlight-box" style="background-color: #fff3cd; border-left-color: #ffc107;">
-        <h4 style="margin-top: 0; color: #856404;">� Payment Information:</h4>
+        <h4 style="margin-top: 0; color: #856404;">💰 Payment Information:</h4>
         <ul style="margin-bottom: 0;">
             ${advanceAmount ? `<li><strong>Advance Payment:</strong> ${formatCurrency(advanceAmount)} (to be paid before check-in)</li>` : ''}
-            ${roomNo && rentAmount ? `<li><strong>Monthly Rent:</strong> ${formatCurrency(rentAmount)} (due on the 1st of each month)</li>` : ''}
+            ${rentType === 'LONG_TERM' && roomNo && rentAmount ? `<li><strong>Monthly Rent:</strong> ${formatCurrency(rentAmount)} (due on the same date each month as your joining date)</li>` : ''}
+            ${rentType === 'SHORT_TERM' && shortTermTotal > 0 ? `<li><strong>Total Amount for Stay:</strong> ${formatCurrency(shortTermTotal)} (already paid and approved)</li>` : ''}
             <li>Payment details and preferred methods will be shared separately</li>
             <li>Please keep all payment receipts for future reference</li>
         </ul>
@@ -252,14 +283,57 @@ export const createApprovalEmailContent = (memberName: string, memberId: string,
         <h4 style="margin-top: 0; color: #004085;">📋 Next Steps:</h4>
         <ul style="margin-bottom: 0;">
             <li><strong>Check-in Date:</strong> ${formatDate(dateOfJoining)}</li>
+            ${rentType === 'SHORT_TERM' ? 
+              `<li><strong>Check-out Date:</strong> ${dateOfRelieving ? formatDate(dateOfRelieving) : 'To be confirmed'}</li>
+               <li>✅ <strong>Payment Status:</strong> Your payment has been processed and approved</li>` : 
+              `<li>Complete the advance payment before your joining date</li>
+               <li>Monthly rent will be due on the same date each month as your joining date</li>`
+            }
             <li>You will receive further instructions about check-in procedures</li>
             <li>Please bring all required documents during check-in</li>
             <li>Contact our support team for any immediate questions</li>
-            <li>Complete the advance payment before your joining date</li>
         </ul>
     </div>
     
     <p>Welcome to the ${ENV.COMPANY_NAME} family! We look forward to providing you with a comfortable and safe living experience.</p>
+    
+    ${rentType === 'LONG_TERM' && otpCode ? `
+    <div class="highlight-box" style="background-color: #d4edda; border-left-color: #28a745;">
+        <h4 style="margin-top: 0; color: #155724;">🔐 Account Access Information</h4>
+        <p style="margin-bottom: 15px;">You can now access your member portal using your email and the temporary OTP below:</p>
+        
+        <div style="background: #007bff; color: white; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
+          <h3 style="margin: 0; font-size: 24px; letter-spacing: 2px; font-family: 'Courier New', monospace;">
+            ${otpCode}
+          </h3>
+          <p style="margin: 10px 0 0 0; font-size: 14px; opacity: 0.9;">
+            Your Initial Setup OTP
+          </p>
+        </div>
+        
+        <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0;">
+          <p style="margin: 0; color: #856404; font-size: 14px;">
+            <strong>⚠️ Important Security Instructions:</strong><br>
+            • This OTP is valid for <strong>24 hours only</strong><br>
+            • Use this OTP as your temporary password for first-time login<br>
+            • After logging in, you'll be asked to create a secure password<br>
+            • Do not share this OTP with anyone<br>
+            • If you don't use this OTP within 24 hours, contact support for a new one
+          </p>
+        </div>
+        
+        <div style="background: #e7f3ff; border-left: 4px solid #007bff; padding: 15px; margin: 15px 0;">
+          <p style="margin: 0; color: #004085; font-size: 14px;">
+            <strong>📱 How to Access Your Account:</strong><br>
+            1. Visit the member login page<br>
+            2. Enter your email: <strong>${memberName.toLowerCase().replace(/\s+/g, '')}@email.com</strong> (use your registered email)<br>
+            3. Click "Login with OTP" option<br>
+            4. Enter the OTP code above<br>
+            5. Set up your permanent password
+          </p>
+        </div>
+    </div>
+    ` : ''}
     
     <p>Best regards,<br>
     <strong>The ${ENV.COMPANY_NAME} Team</strong></p>

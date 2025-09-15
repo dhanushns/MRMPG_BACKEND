@@ -4,6 +4,7 @@ import Joi from "joi";
 export const createRoomSchema = Joi.object({
   roomNo: Joi.string().required().min(1).max(10).trim(),
   rent: Joi.number().required().min(0).max(999999),
+  electricityCharge: Joi.number().required().min(0).max(999999),
   capacity: Joi.number().integer().required().min(1).max(20),
   pgLocation: Joi.string().optional()
 });
@@ -12,6 +13,7 @@ export const createRoomSchema = Joi.object({
 export const updateRoomSchema = Joi.object({
   roomNo: Joi.string().optional().min(1).max(10).trim(),
   rent: Joi.number().optional().min(0).max(999999),
+  electricityCharge: Joi.number().optional().min(0).max(999999),
   capacity: Joi.number().integer().optional().min(1).max(20),
 }).min(1);
 

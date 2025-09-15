@@ -1,0 +1,14 @@
+-- AlterTable
+ALTER TABLE "public"."ExpenseStats" ADD COLUMN     "cashInAmountChange" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "cashInCountChange" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "cashInPercentChange" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "cashOutAmountChange" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "cashOutCountChange" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "cashOutPercentChange" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "growthRate" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "isGrowthMonth" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "netAmountChange" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN     "netPercentChange" DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+-- CreateIndex
+CREATE INDEX "ExpenseStats_isGrowthMonth_idx" ON "public"."ExpenseStats"("isGrowthMonth");

@@ -2,10 +2,10 @@ import  { Router } from "express";
 import { 
   getRegisteredMembers, 
   approveOrRejectMember, 
-  calculateAndUpdateApprovalStats, 
   getApprovalStats,
   getMembersPaymentData,
   getMembersPaymentFilterOptions,
+  getMonthOptionsForYear,
   approveOrRejectPayment
 } from "../controllers/approvalController";
 import { authenticateAdmin, authorizeAdmin } from "../middlewares/auth";
@@ -20,7 +20,6 @@ router.use(authorizeAdmin);
 
 // Approval statistics routes
 router.get("/stats", getApprovalStats);
-router.post("/stats/refresh", calculateAndUpdateApprovalStats);
 
 // Registered members approvals routes
 router.get("/members", validateQuery(registeredMembersQuerySchema), getRegisteredMembers);
@@ -29,6 +28,7 @@ router.put("/members/:id", validateParams(idParamSchema), validateBody(approveRe
 // Members payment data routes
 router.get("/payments", validateQuery(memberPaymentQuerySchema), getMembersPaymentData);
 router.get("/payments/filters", getMembersPaymentFilterOptions);
+router.get("/payments/filters/months", getMonthOptionsForYear);
 router.put("/payments/:paymentId", validateParams(paymentIdParamSchema), validateBody(approveRejectPaymentSchema), approveOrRejectPayment);
 
 export default router;
