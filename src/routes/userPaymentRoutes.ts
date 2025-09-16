@@ -4,7 +4,7 @@ import {
   getMemberPayments,
   getPaymentDetails,
   getMemberPaymentsByYear,
-} from "../controllers/paymentController";
+} from "../controllers/userPaymentController";
 import { authenticateUser } from "../middlewares/auth";
 import {
   validateUploadPayment,

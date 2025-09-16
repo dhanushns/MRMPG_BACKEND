@@ -3,30 +3,46 @@ import pgRoutes from "./pgRoutes";
 import adminRoutes from "./adminRoutes";
 import roomRoutes from "./roomRoutes";
 import registrationRoutes from "./registrationRoutes";
-import approvalRoutes from "./approvalRoutes";
-import dashboardRoutes from "./dashboardRoutes";
+import statsRoutes from "./statsRoutes";
+import filterRoutes from "./filterRoutes";
 import memberRoutes from "./memberRoutes";
 import enquiryRoutes from "./enquiryRoutes";
 import reportRoutes from "./reportRoutes";
 import userRoutes from "./userRoutes";
-import paymentRoutes from "./paymentRoutes";
+import userPaymentRoutes from "./userPaymentRoutes";
 import expenseRoutes from "./expenseRoutes";
+import staffRoutes from "./staffRoutes";
+import memberApprovalRoutes from "./memberApprovalRoutes"
+import paymentApprovalRoutes from "./paymentApprovalRoutes"
+import userLeavingRequestRoutes from "./userLeavingRequestRoutes";
+import leavingReqApprovalRoutes from "./leavingReqApprovalRoutes";
 
 const router = Router();
 
 // Mount route modules
+
+router.use("/register", registrationRoutes);
+
 router.use("/pg", pgRoutes);
 router.use("/admin", adminRoutes);
-router.use("/rooms", roomRoutes);
-router.use("/register", registrationRoutes);
-router.use("/approval", approvalRoutes);
-router.use("/dashboard", dashboardRoutes);
+
+router.use("/stats", statsRoutes);
+router.use("/filters", filterRoutes);
+
+router.use("/approvals/members",memberApprovalRoutes);
+router.use("/approvals/payments",paymentApprovalRoutes);
+router.use("/approvals/leaving-requests",leavingReqApprovalRoutes );
+
 router.use("/members", memberRoutes);
+router.use("/rooms", roomRoutes);
 router.use("/enquiry", enquiryRoutes);
 router.use("/report", reportRoutes);
-router.use("/user", userRoutes);
-router.use("/payments", paymentRoutes);
 router.use("/expenses", expenseRoutes);
+router.use("/staff", staffRoutes);
+
+router.use("/user", userRoutes);
+router.use("/user/payments", userPaymentRoutes);
+router.use("/user/leaving-requests", userLeavingRequestRoutes);
 
 // Health check endpoint
 router.get("/health", (req, res) => {

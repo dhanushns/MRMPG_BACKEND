@@ -361,3 +361,27 @@ export const validateUpdateProfile = (req: Request, res: Response, next: NextFun
 
   next();
 };
+
+// Leaving Request Validation Schemas
+
+// Validation for applying leaving request
+export const applyLeavingRequestSchema = Joi.object({
+  requestedLeaveDate: Joi.date().iso().required().min('now'),
+  reason: Joi.string().required().min(10).max(1000).trim()
+});
+
+// Validation middleware for applying leaving request
+export const validateApplyLeavingRequest = (req: Request, res: Response, next: NextFunction): void => {
+  const { error } = applyLeavingRequestSchema.validate(req.body);
+  
+  if (error) {
+    res.status(400).json({
+      success: false,
+      message: "Validation error",
+      error: error.details[0].message,
+    } as ApiResponse<null>);
+    return;
+  }
+  
+  next();
+};

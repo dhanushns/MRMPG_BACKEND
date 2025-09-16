@@ -6,7 +6,6 @@ import {
   getExpenseById,
   updateExpense,
   deleteExpense,
-  getExpenseStats
 } from '../controllers/expenseController';
 import { authenticateAdmin } from '../middlewares/auth';
 import { validateBody, validateParams, validateQuery } from '../middlewares/validation';
@@ -22,7 +21,7 @@ const router = express.Router();
 
 // Configure multer for file uploads (expense bills)
 const upload = multer({
-  dest: 'uploads/expense/',
+  dest: 'uploads/bills/',
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB limit per file
     files: 3 // Maximum 3 files
@@ -52,12 +51,6 @@ router.get(
   '/',
   validateQuery(getExpensesValidation),
   getExpenses
-);
-
-router.get(
-  '/stats',
-  validateQuery(expenseStatsValidation),
-  getExpenseStats
 );
 
 

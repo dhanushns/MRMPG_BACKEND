@@ -1044,3 +1044,95 @@ export const getCurrentMonthOverview = async (req: AuthenticatedMemberRequest, r
     } as ApiResponse<null>);
   }
 };
+
+export const updateDigitalSignature = async (req: AuthenticatedMemberRequest, res: Response) => {
+  try {
+    const memberId = req.member?.id;
+
+    if (!memberId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required',
+      } as ApiResponse<null>);
+    }
+
+    // Check if file was uploaded
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Digital signature image is required',
+      } as ApiResponse<null>);
+    }
+
+    // Get current member to check if they have an existing digital signature
+    const currentMember = await prisma.member.findUnique({
+      where: { id: memberId },
+      select: { digitalSignature: true, name: true }
+    });
+
+    if (!currentMember) {
+      return res.status(404).json({
+        success: false,
+        message: 'Member not found',
+      } as ApiResponse<null>);
+    }
+
+    // If member has an existing digital signature, delete the old file
+    if (currentMember.digitalSignature) {
+      try {
+        const { deleteImage, ImageType } = await import('../utils/imageUpload');
+        await deleteImage(currentMember.digitalSignature, ImageType.DOCUMENT);
+      } catch (error) {
+        console.warn('Failed to delete old digital signature:', error);
+        // Continue with update even if old file deletion fails
+      }
+    }
+
+    // Update the member's digital signature
+    const updatedMember = await prisma.member.update({
+      where: { id: memberId },
+      data: {
+        digitalSignature: req.file.filename
+      },
+      select: {
+        id: true,
+        name: true,
+        digitalSignature: true
+      }
+    });
+
+    // Get the image URL for response
+    const { getImageUrl, ImageType } = await import('../utils/imageUpload');
+    const digitalSignatureUrl = getImageUrl(req.file.filename, ImageType.DOCUMENT);
+
+    res.status(200).json({
+      success: true,
+      message: 'Digital signature updated successfully',
+      data: {
+        id: updatedMember.id,
+        name: updatedMember.name,
+        digitalSignature: updatedMember.digitalSignature,
+        digitalSignatureUrl
+      }
+    } as ApiResponse<any>);
+
+  } catch (error) {
+    console.error('Update digital signature error:', error);
+    
+    // If there was an error, try to clean up the uploaded file
+    if (req.file) {
+      try {
+        const { deleteImage, ImageType } = await import('../utils/imageUpload');
+        await deleteImage(req.file.filename, ImageType.DOCUMENT);
+      } catch (cleanupError) {
+        console.warn('Failed to cleanup uploaded file after error:', cleanupError);
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update digital signature',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    } as ApiResponse<null>);
+  }
+};

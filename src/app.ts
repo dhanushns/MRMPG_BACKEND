@@ -6,7 +6,6 @@ import path from "path";
 import routes from "./routes";
 import { ENV } from "./config/env";
 import { initializePaymentScheduler } from "./utils/paymentScheduler";
-import { expenseStatsScheduler } from "./utils/expenseStatsScheduler";
 
 const app = express();
 
@@ -86,9 +85,6 @@ if (ENV.NODE_ENV === "development") {
   
   // Initialize payment scheduler
   initializePaymentScheduler();
-  
-  // Initialize expense stats scheduler
-  expenseStatsScheduler.start();
 }
 
 export default app;

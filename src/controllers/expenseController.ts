@@ -127,20 +127,43 @@ export const getExpenses = async (req: AuthenticatedRequest, res: Response) => {
       take: pageSize
     });
 
+    // Flatten the expense data structure
+    const flattenedExpenses = expenses.map(expense => ({
+      id: expense.id,
+      entryType: expense.entryType,
+      amount: expense.amount,
+      date: expense.date,
+      partyName: expense.partyName,
+      paymentType: expense.paymentType,
+      remarks: expense.remarks,
+      attachedBill1: expense.attachedBill1,
+      attachedBill2: expense.attachedBill2,
+      attachedBill3: expense.attachedBill3,
+      createdBy: expense.createdBy,
+      pgId: expense.pgId,
+      createdAt: expense.createdAt,
+      updatedAt: expense.updatedAt,
+      // Flattened admin fields
+      adminId: expense.admin.id,
+      adminName: expense.admin.name,
+      adminEmail: expense.admin.email,
+      // Flattened PG fields
+      pgName: expense.pg.name,
+      pgType: expense.pg.type,
+      pgLocation: expense.pg.location
+    }));
+
     const totalPages = Math.ceil(totalExpenses / pageSize);
 
     res.status(200).json({
       success: true,
       message: 'Expenses retrieved successfully',
-      data: {
-        expenses,
-        pagination: {
-          currentPage: pageNumber,
-          totalPages,
-          totalExpenses,
-          hasNextPage: pageNumber < totalPages,
-          hasPrevPage: pageNumber > 1
-        }
+      data: flattenedExpenses,
+      pagination: {
+        page: pageNumber,
+        limit: pageSize,
+        total: totalExpenses,
+        totalPages
       }
     } as ApiResponse<any>);
   } catch (error) {
@@ -283,138 +306,6 @@ export const deleteExpense = async (req: AuthenticatedRequest, res: Response) =>
     res.status(500).json({
       success: false,
       message: 'Failed to delete expense',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    } as ApiResponse<null>);
-  }
-};
-
-export const getExpenseStats = async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { month, year } = req.query;
-
-    if (!req.admin) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentication required',
-      } as ApiResponse<null>);
-    }
-
-    // Get admin details to know their pgType
-    const admin = await prisma.admin.findUnique({
-      where: { id: req.admin.id },
-      select: { pgType: true },
-    });
-
-    if (!admin) {
-      return res.status(404).json({
-        success: false,
-        message: 'Admin not found',
-      } as ApiResponse<null>);
-    }
-
-    // Use current month/year if not provided
-    const now = new Date();
-    const targetMonth = month ? parseInt(month as string) : now.getMonth() + 1;
-    const targetYear = year ? parseInt(year as string) : now.getFullYear();
-
-    // Get expense stats for the requested month/year and pgType
-    const expenseStats = await prisma.expenseStats.findUnique({
-      where: {
-        pgType_month_year: {
-          pgType: admin.pgType,
-          month: targetMonth,
-          year: targetYear,
-        },
-      },
-    });
-
-    // If no stats found, return zero stats
-    if (!expenseStats) {
-      return res.status(404).json({
-        success: false,
-        message: `No expense statistics found for ${getMonthName(targetMonth)} ${targetYear}`,
-      } as ApiResponse<null>);
-    }
-
-    // Helper function to format currency
-    const formatCurrency = (amount: number): string => {
-      return `₹${amount.toLocaleString("en-IN")}`;
-    };
-
-    // Helper function to format numbers
-    const formatNumber = (num: number): string => {
-      return num.toLocaleString("en-IN");
-    };
-
-    // Helper function to get month name
-    function getMonthName(monthNum: number): string {
-      const monthNames = [
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December"
-      ];
-      return monthNames[monthNum - 1];
-    }
-
-    // Format expense stats as cards
-    const cards = [
-      {
-        title: "Total Cash In",
-        value: formatCurrency(expenseStats.totalCashInAmount),
-        trend: expenseStats.cashInPercentChange >= 0 ? "up" : "down",
-        percentage: Math.abs(Math.round(expenseStats.cashInPercentChange)),
-        icon: "trendingUp",
-        color: "success",
-        subtitle: `${formatNumber(expenseStats.totalCashInCount)} transactions`,
-        paymentBreakdown: {
-          online: formatCurrency(expenseStats.cashInOnline),
-          cash: formatCurrency(expenseStats.cashInCash),
-        },
-      },
-      {
-        title: "Total Cash Out",
-        value: formatCurrency(expenseStats.totalCashOutAmount),
-        trend: expenseStats.cashOutPercentChange >= 0 ? "up" : "down",
-        percentage: Math.abs(Math.round(expenseStats.cashOutPercentChange)),
-        icon: "trendingDown",
-        color: "error",
-        subtitle: `${formatNumber(expenseStats.totalCashOutCount)} transactions`,
-        paymentBreakdown: {
-          online: formatCurrency(expenseStats.cashOutOnline),
-          cash: formatCurrency(expenseStats.cashOutCash),
-        },
-      },
-      {
-        title: "Net Amount",
-        value: formatCurrency(expenseStats.netAmount),
-        trend: expenseStats.netPercentChange >= 0 ? "up" : "down",
-        percentage: Math.abs(Math.round(expenseStats.netPercentChange)),
-        icon: expenseStats.netAmount >= 0 ? "cash" : "minusCircle",
-        color: expenseStats.netAmount >= 0 ? "primary" : "warning",
-        subtitle: expenseStats.netAmount >= 0 ? "Profit this month" : "Loss this month",
-      },
-    ];
-
-    const responseData = {
-      cards,
-      period: {
-        month: targetMonth,
-        year: targetYear,
-        monthName: getMonthName(targetMonth),
-      },
-      pgType: admin.pgType,
-      lastUpdated: expenseStats.updatedAt,
-    };
-
-    res.status(200).json({
-      success: true,
-      message: 'Expense statistics retrieved successfully',
-      data: responseData
-    } as ApiResponse<any>);
-  } catch (error) {
-    console.error('Error getting expense stats:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to retrieve expense statistics',
       error: error instanceof Error ? error.message : 'Unknown error'
     } as ApiResponse<null>);
   }

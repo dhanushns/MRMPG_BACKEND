@@ -1,25 +1,27 @@
 import { Router } from "express";
-import { getMembersByRentType, getMemberFilterOptions, getMemberDetails } from "../controllers/memberController";
-import { authenticateAdmin } from "../middlewares/auth";
-import { validateParams, validateQuery } from "../middlewares/validation";
+import {
+  getMembersByRentType,
+  getMemberDetails,
+  getAllMembers,
+} from "../controllers/memberController";
+import { authenticateAdmin, authorizeAdmin } from "../middlewares/auth";
+import { validateQuery } from "../middlewares/validation";
 import { memberQuerySchema } from "../validations/memberValidation";
+import { getAllMembersQuerySchema } from "../validations/dashboardValidation";
 
 const router = Router();
 
-// Get filter options for members
-router.get(
-  "/filters",
-  authenticateAdmin,
-  getMemberFilterOptions
-);
+router.use(authenticateAdmin);
+router.use(authorizeAdmin);
+
+router.get("/", validateQuery(getAllMembersQuerySchema), getAllMembers);
+
+router.get("/:memberId", getMemberDetails);
 
 router.get(
-  "/:rentType",
-  authenticateAdmin,
+  "/rent/:rentType",
   validateQuery(memberQuerySchema),
   getMembersByRentType
 );
-
-router.get("/details/:memberId", authenticateAdmin, getMemberDetails);
 
 export default router;

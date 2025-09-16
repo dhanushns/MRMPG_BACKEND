@@ -10,9 +10,11 @@ import {
   getMemberProfile,
   updateMemberProfile,
   getCurrentMonthOverview,
+  updateDigitalSignature,
 } from "../controllers/userController";
 import { authenticateUser } from "../middlewares/auth";
-import { validateMemberLogin, validatePasswordSetup, validateChangePassword, validateResetPassword, validateOTPRequest, validateUpdateProfile } from "../validations/userValidation";
+import { validateMemberLogin, validatePasswordSetup, validateChangePassword, validateResetPassword, validateOTPRequest, validateUpdateProfile, validateApplyLeavingRequest } from "../validations/userValidation";
+import { documentImageUpload } from "../utils/imageUpload";
 
 const router = Router();
 
@@ -35,5 +37,7 @@ router.get("/profile", authenticateUser, getMemberProfile);
 router.put("/profile", authenticateUser, validateUpdateProfile, updateMemberProfile);
 
 router.get("/current-month-overview", authenticateUser, getCurrentMonthOverview);
+
+router.put("/digital-signature", authenticateUser, documentImageUpload.single('digitalSignature'), updateDigitalSignature);
 
 export default router;

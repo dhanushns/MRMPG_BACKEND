@@ -6,9 +6,7 @@ import {
   getEnquiries,
   getEnquiryById,
   updateEnquiryStatus,
-  getEnquiryStats,
   deleteEnquiry,
-  getEnquiryFilterOptions,
 } from "../controllers/enquiryController";
 import {
   createEnquirySchema,
@@ -31,18 +29,6 @@ router.get(
   authenticateAdmin,
   validateQuery(enquiryFilterQuerySchema),
   getEnquiries
-);
-
-router.get(
-  "/stats",
-  authenticateAdmin,
-  getEnquiryStats
-);
-
-router.get(
-  "/filters",
-  authenticateAdmin,
-  getEnquiryFilterOptions
 );
 
 router.get(

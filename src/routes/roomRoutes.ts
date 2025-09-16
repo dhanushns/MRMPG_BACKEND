@@ -5,9 +5,6 @@ import {
   createRoom,
   updateRoom,
   deleteRoom,
-  getRoomsByLocation,
-  getRoomStats,
-  getRoomFilterOptions,
 } from "../controllers/roomController";
 import { validateBody, validateParams, validateQuery } from "../middlewares/validation";
 import { authenticateAdmin, authorizeAdmin } from "../middlewares/auth";
@@ -26,16 +23,6 @@ const router = Router();
 // All routes require authentication and authorization
 router.use(authenticateAdmin);
 router.use(authorizeAdmin);
-
-// GET /rooms/location/:location - Get rooms by location
-router.get("/location/:location", validateParams(locationParamSchema), getRoomsByLocation);
-
-// Rooms Filters
-router.get("/filters", getRoomFilterOptions);
-
-// GET Room stats - defaults to first PG if no pgId provided
-router.get("/stats", getRoomStats);
-router.get("/:pgId/stats", validateParams(pgIdParamSchema), getRoomStats);
 
 // GET all rooms - defaults to first PG if no pgId provided
 router.get("/", validateQuery(roomFilterQuerySchema), getRooms);

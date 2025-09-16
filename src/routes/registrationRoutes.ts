@@ -3,13 +3,10 @@ import multer from "multer";
 import {
   validatePersonalData,
   completeRegistration,
-  getPgLocationOptions,
-  getRoomsByPgId,
 } from "../controllers/registrationController";
 import { validateBody, validateParams, validateQuery } from "../middlewares/validation";
 import {
   validatePersonalDataSchema,
-  submitPaymentSchema,
 } from "../validations/userValidation";
 import { fileFilter } from "../utils/imageUpload";
 
@@ -41,14 +38,6 @@ const registrationUpload = multer({
   }
 });
 
-// Public routes for member registration
-
-// Get PG location options for registration form
-router.get("/pg-locations", getPgLocationOptions);
-
-// Get rooms by PG ID for registration form
-router.get("/rooms", getRoomsByPgId);
-
 router.post("/validate", 
   validateBody(validatePersonalDataSchema), 
   validatePersonalData
@@ -61,6 +50,7 @@ router.post("/",
   ]),
   completeRegistration
 );
+
 
 
 export default router;
