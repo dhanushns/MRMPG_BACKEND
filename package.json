@@ -21,7 +21,9 @@
   "description": "",
   "dependencies": {
     "@prisma/client": "^6.14.0",
+    "@types/archiver": "^6.0.3",
     "@types/multer": "^2.0.0",
+    "archiver": "^7.0.1",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
@@ -33,7 +35,8 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
-    "nodemailer": "^7.0.5"
+    "nodemailer": "^7.0.5",
+    "puppeteer": "^24.21.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

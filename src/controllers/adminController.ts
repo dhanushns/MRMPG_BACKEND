@@ -8,6 +8,8 @@ import { ENV } from "../config/env";
 import { 
   updateOverduePayments,
 } from "../utils/paymentRecordManager";
+import { cleanupInactiveMemberData } from "../utils/memberCleanup";
+import { updateLeavingRequestPendingDues } from "../utils/leavingRequestDuesCalculator";
 
 // Admin login
 export const loginAdmin = async (req: Request, res: Response): Promise<void> => {
@@ -315,6 +317,70 @@ export const updateOverduePaymentsEndpoint = async (
       success: false,
       message: "Internal server error", 
       error: "Failed to update overdue payments",
+    } as ApiResponse<null>);
+  }
+};
+
+// Manual cleanup of inactive member data
+export const cleanupInactiveMembers = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+        error: "Admin authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const result = await cleanupInactiveMemberData();
+
+    res.status(200).json({
+      success: true,
+      message: result.deletedMembers > 0 
+        ? `Successfully cleaned up ${result.deletedMembers} inactive members and ${result.deletedFiles} files`
+        : "No inactive members found for cleanup",
+      data: result,
+    } as ApiResponse<any>);
+
+  } catch (error) {
+    console.error("Error during manual member cleanup:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error", 
+      error: "Failed to cleanup inactive members",
+    } as ApiResponse<null>);
+  }
+};
+
+// Update pending dues for all leaving requests
+export const updateLeavingRequestDues = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+        error: "Admin authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const result = await updateLeavingRequestPendingDues();
+
+    res.status(200).json({
+      success: true,
+      message: result.updatedRequests > 0 
+        ? `Successfully updated pending dues for ${result.updatedRequests} leaving requests`
+        : "No leaving request dues updates required",
+      data: result,
+    } as ApiResponse<any>);
+
+  } catch (error) {
+    console.error("Error during manual leaving request dues update:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error", 
+      error: "Failed to update leaving request dues",
     } as ApiResponse<null>);
   }
 };

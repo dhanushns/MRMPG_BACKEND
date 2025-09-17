@@ -7,7 +7,13 @@ import {
 } from "../controllers/userPaymentController";
 import { authenticateUser } from "../middlewares/auth";
 import {
+  uploadPaymentScreenshots,
+  uploadPaymentCash,
+} from "../middlewares/paymentUpload";
+import {
   validateUploadPayment,
+  validateCashPayment,
+  validateOnlinePayment,
   validatePaymentHistoryQuery,
   validatePaymentIdParam,
   validateYearParam,
@@ -16,8 +22,21 @@ import {
 
 const router = Router();
 
-// Upload new payment
-router.post("/upload", authenticateUser, validateUploadPayment, uploadPayment);
+// Upload cash payment (no images)
+router.post("/upload/cash", 
+  authenticateUser, 
+  uploadPaymentCash, 
+  validateCashPayment, 
+  uploadPayment
+);
+
+// Upload online payment (
+router.post("/upload/online", 
+  authenticateUser, 
+  uploadPaymentScreenshots, 
+  validateOnlinePayment, 
+  uploadPayment
+);
 
 // Get payment history for authenticated member
 router.get("/history", authenticateUser, validatePaymentHistoryQuery, getMemberPayments);

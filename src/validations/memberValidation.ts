@@ -4,7 +4,7 @@ import { Gender, RentType, PgType } from "@prisma/client";
 // Member registration validation schema
 export const registerMemberSchema = Joi.object({
   name: Joi.string().required().min(2).max(100).trim(),
-  age: Joi.number().integer().required().min(16).max(100),
+  dob: Joi.date().iso().required().max('now').min('1900-01-01'),
   gender: Joi.string().valid(...Object.values(Gender)).required(),
   location: Joi.string().required().min(2).max(200).trim(),
   pgLocation: Joi.string().required().min(2).max(200).trim(),
@@ -17,7 +17,7 @@ export const registerMemberSchema = Joi.object({
 // Member creation validation schema (for admin use)
 export const createMemberSchema = Joi.object({
   name: Joi.string().required().min(2).max(100).trim(),
-  age: Joi.number().integer().required().min(16).max(100),
+  dob: Joi.date().iso().required().max('now').min('1900-01-01'),
   gender: Joi.string().valid(...Object.values(Gender)).required(),
   location: Joi.string().required().min(2).max(200).trim(),
   email: Joi.string().email().required(),
@@ -45,7 +45,7 @@ export const memberQuerySchema = Joi.object({
   search: Joi.string().optional().allow(""),
   sortBy: Joi.string()
     .valid(
-      "createdAt", "name", "memberId", "dateOfJoining", "age", 
+      "createdAt", "name", "memberId", "dateOfJoining", "dob", 
       "location", "work", "pgName", "pgLocation", "roomNo", "rentAmount",
       "gender", "email", "phone", "rentType", "advanceAmount"
     )

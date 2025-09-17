@@ -3,7 +3,6 @@ import {
   verifyMemberOTP,
   setupMemberPassword,
   memberLogin,
-  requestNewOTP,
   changeMemberPassword,
   resetMemberPassword,
   requestPasswordResetOTP,
@@ -12,8 +11,8 @@ import {
   getCurrentMonthOverview,
   updateDigitalSignature,
 } from "../controllers/userController";
-import { authenticateUser } from "../middlewares/auth";
-import { validateMemberLogin, validatePasswordSetup, validateChangePassword, validateResetPassword, validateOTPRequest, validateUpdateProfile, validateApplyLeavingRequest } from "../validations/userValidation";
+import { authenticateUser } from "../middlewares/auth";;
+import { validateMemberLogin, validatePasswordSetup, validateChangePassword, validateResetPassword, validateOTPRequest, validateUpdateProfile } from "../validations/userValidation";
 import { documentImageUpload } from "../utils/imageUpload";
 
 const router = Router();
@@ -24,11 +23,9 @@ router.post("/setup-password", authenticateUser, validatePasswordSetup, setupMem
 
 router.post("/login", validateMemberLogin, memberLogin);
 
-router.post("/request-otp", validateOTPRequest, requestNewOTP);
-
 router.post("/change-password", authenticateUser, validateChangePassword, changeMemberPassword);
 
-router.post("/request-password-reset", validateOTPRequest, requestPasswordResetOTP);
+router.post("/request-otp", validateOTPRequest, requestPasswordResetOTP);
 
 router.post("/reset-password", validateResetPassword, resetMemberPassword);
 

@@ -356,13 +356,6 @@ export const getMembersPaymentFilterOptions = async (
       distinct: ["location"],
     });
 
-    // Get unique rent types from members of admin's PG type
-    const rentTypes = await prisma.member.findMany({
-      where: { pgId: { in: pgIds } },
-      select: { rentType: true },
-      distinct: ["rentType"],
-    });
-
     // Get current date for generating month/year options
     const currentDate = new Date();
     const currentYear = currentDate.getFullYear();
@@ -467,17 +460,6 @@ export const getMembersPaymentFilterOptions = async (
         variant: "dropdown" as const,
         searchable: true,
         showSelectAll: true,
-      },
-      {
-        id: "rentType",
-        label: "Rent Type",
-        placeholder: "Select rent type",
-        type: "select",
-        options: [
-          { value: "LONG_TERM", label: "Long Term" },
-          { value: "SHORT_TERM", label: "Short Term" },
-        ],
-        variant: "dropdown" as const,
       },
       {
         id: "paymentStatus",
@@ -1069,6 +1051,253 @@ export const getRoomsByPgId = async (
       message: "Internal server error",
       error: "Failed to retrieve rooms",
     });
+  }
+};
+
+// Get available weeks for reports (excluding future weeks)
+export const getAvailableWeeks = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Get month parameter from query (optional, defaults to current month)
+    const monthParam = req.query.month as string;
+    const yearParam = req.query.year as string;
+    
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = currentDate.getMonth() + 1;
+    
+    // Use provided month/year or default to current month/year
+    const month = monthParam ? parseInt(monthParam) : currentMonth;
+    const year = yearParam ? parseInt(yearParam) : currentYear;
+
+    if (month < 1 || month > 12) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid month. Month should be between 1-12",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const weeks = [];
+    let currentWeek = null;
+
+    // Get the first and last day of the specified month
+    const monthStart = new Date(year, month - 1, 1);
+    const monthEnd = new Date(year, month, 0); // Last day of the month
+
+    // Calculate weeks within the specified month
+    let weekNumber = 1;
+    let currentWeekStart = new Date(monthStart);
+
+    while (currentWeekStart <= monthEnd) {
+      const weekEnd = new Date(currentWeekStart);
+      weekEnd.setDate(currentWeekStart.getDate() + 6);
+      
+      // If we're in a future month/year, or future week in current month, break
+      if (year > currentYear || 
+          (year === currentYear && month > currentMonth) ||
+          (year === currentYear && month === currentMonth && currentWeekStart > currentDate)) {
+        break;
+      }
+
+      // Ensure week end doesn't go beyond the month
+      if (weekEnd > monthEnd) {
+        weekEnd.setTime(monthEnd.getTime());
+      }
+
+      // Only add week if it has started
+      if (currentWeekStart <= currentDate) {
+        const weekData = {
+          week: weekNumber,
+          month: month,
+          year: year,
+          startDate: currentWeekStart.toISOString().split('T')[0],
+          endDate: weekEnd.toISOString().split('T')[0],
+          label: `Week ${weekNumber} (${currentWeekStart.getDate()}-${weekEnd.getDate()})`,
+        };
+        
+        weeks.push(weekData);
+
+        // Check if this is the current week
+        if (year === currentYear && month === currentMonth && 
+            currentDate >= currentWeekStart && currentDate <= weekEnd) {
+          currentWeek = weekData;
+        }
+      }
+
+      // Move to next week
+      currentWeekStart = new Date(weekEnd);
+      currentWeekStart.setDate(weekEnd.getDate() + 1);
+      weekNumber++;
+    }
+
+    const monthNames = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+
+    res.status(200).json({
+      success: true,
+      message: "Available weeks retrieved successfully",
+      data: {
+        weeks: weeks.reverse(), // Most recent first
+        currentWeek: currentWeek, // Current week to select
+        monthInfo: {
+          month: month,
+          year: year,
+          name: monthNames[month - 1],
+          label: `${monthNames[month - 1]} ${year}`,
+        },
+      },
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error("Error getting available weeks:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: "Failed to retrieve available weeks",
+    } as ApiResponse<null>);
+  }
+};
+
+// Get available months for reports (excluding future months)
+export const getAvailableMonths = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Get admin details to know their pgType
+    const admin = await prisma.admin.findUnique({
+      where: { id: req.admin.id },
+      select: { pgType: true },
+    });
+
+    if (!admin) {
+      res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Get all PGs of admin's type
+    const pgs = await prisma.pG.findMany({
+      where: { type: admin.pgType },
+      select: { id: true },
+    });
+
+    const pgIds = pgs.map((pg) => pg.id);
+
+    // Get year parameter from query (optional, defaults to current year)
+    const yearParam = req.query.year as string;
+    
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const currentMonth = currentDate.getMonth() + 1;
+    
+    // Use provided year or default to current year
+    const year = yearParam ? parseInt(yearParam) : currentYear;
+
+    if (year < 1900 || year > currentYear + 10) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid year",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // If requested year is in the future, return empty array
+    if (year > currentYear) {
+      res.status(200).json({
+        success: true,
+        message: "No months available for future years",
+        data: {
+          months: [],
+          currentMonth: null,
+          yearInfo: {
+            year: year,
+            isFuture: true,
+          },
+        },
+      } as ApiResponse<any>);
+      return;
+    }
+
+    const monthNames = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+
+    const months = [];
+    let currentMonthData = null;
+
+    // For requested year, determine max month
+    const maxMonth = year === currentYear ? currentMonth : 12;
+
+    // Check if admin has any payment data for the requested year
+    const hasDataInYear = await prisma.payment.count({
+      where: {
+        pgId: { in: pgIds },
+        year: year,
+      },
+    });
+
+    // Generate months for the requested year up to maxMonth
+    for (let month = 1; month <= maxMonth; month++) {
+      const monthData = {
+        month: month,
+        year: year,
+        name: monthNames[month - 1],
+        label: `${monthNames[month - 1]} ${year}`,
+      };
+      
+      months.push(monthData);
+
+      // Mark current month if we're in the requested year
+      if (year === currentYear && month === currentMonth) {
+        currentMonthData = monthData;
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Available months retrieved successfully",
+      data: {
+        months: months.reverse(), // Most recent first
+        currentMonth: currentMonthData, // Current month to select
+        yearInfo: {
+          year: year,
+          isCurrent: year === currentYear,
+          isPast: year < currentYear,
+          hasData: hasDataInYear > 0,
+        },
+      },
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error("Error getting available months:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: "Failed to retrieve available months",
+    } as ApiResponse<null>);
   }
 };
 

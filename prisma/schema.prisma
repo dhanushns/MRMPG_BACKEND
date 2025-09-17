@@ -75,7 +75,7 @@ model Member {
   id       String  @id @default(cuid())
   memberId String  @unique // auto generated unique member ID
   name     String
-  age      Int
+  dob      DateTime
   gender   Gender
   location String
   email    String  @unique
@@ -116,7 +116,7 @@ model OTP {
   member    Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
   email     String
   code      String // Hashed OTP code
-  type      OTPType   @default(LOGIN) // LOGIN, PASSWORD_RESET, etc.
+  type      OTPType   @default(PASSWORD_RESET)
   used      Boolean   @default(false) // Prevent reuse
   expiresAt DateTime
   createdAt DateTime  @default(now())
@@ -131,7 +131,7 @@ model OTP {
 model RegisteredMember {
   id              String    @id @default(cuid())
   name            String
-  age             Int
+  dob             DateTime
   gender          Gender
   location        String
   pgLocation      String
@@ -157,6 +157,7 @@ model LeavingRequest {
   room               Room?                @relation(fields: [roomId], references: [id], onDelete: SetNull)
   requestedLeaveDate DateTime // When the member wants to leave
   reason             String               @db.Text // Reason for leaving
+  feedback           String?              @db.Text // Optional feedback about PG
   status             LeavingRequestStatus @default(PENDING)
   approvedBy         String? // Admin ID who approved/rejected
   approvedAt         DateTime? // When the request was processed
@@ -195,7 +196,6 @@ model Payment {
   attemptNumber  Int            @default(1)
   paymentStatus  PaymentStatus  @default(PENDING)
   approvalStatus ApprovalStatus @default(PENDING)
-  rejectedReason String?
   approvedBy     String? // Admin ID
   approvedAt     DateTime?
 
@@ -394,7 +394,6 @@ enum LeavingRequestStatus {
 }
 
 enum OTPType {
-  LOGIN
   PASSWORD_RESET
   INITIAL_SETUP
 }

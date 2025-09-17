@@ -9,7 +9,8 @@ import {
   hashOTP, 
   verifyOTP 
 } from "../utils/auth";
-import { sendEmail } from "../utils/emailService";
+import { sendEmail } from "../services/emailService";
+import calculateAge from "../utils/ageCalculator";
 
 // Enhanced request interface for member auth
 export interface AuthenticatedMemberRequest extends Request {
@@ -72,7 +73,7 @@ const createOTPEmailContent = (name: string, otpCode: string, isInitialSetup: bo
 };
 
 // Send OTP to member
-export const sendMemberOTP = async (memberId: string, type: 'LOGIN' | 'PASSWORD_RESET' | 'INITIAL_SETUP' = 'INITIAL_SETUP'): Promise<void> => {
+export const sendMemberOTP = async (memberId: string, type: 'PASSWORD_RESET' | 'INITIAL_SETUP' = 'INITIAL_SETUP'): Promise<void> => {
   try {
     const member = await prisma.member.findUnique({
       where: { id: memberId },
@@ -477,72 +478,6 @@ export const memberLogin = async (req: Request, res: Response): Promise<void> =>
   }
 };
 
-// Request new OTP
-export const requestNewOTP = async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { email, type = 'INITIAL_SETUP' } = req.body;
-
-    if (!email) {
-      res.status(400).json({
-        success: false,
-        message: 'Email is required',
-      } as ApiResponse<null>);
-      return;
-    }
-
-    const member = await prisma.member.findUnique({
-      where: { email },
-    });
-
-    if (!member) {
-      res.status(404).json({
-        success: false,
-        message: 'Member not found',
-      } as ApiResponse<null>);
-      return;
-    }
-
-    if (!member.isActive) {
-      res.status(403).json({
-        success: false,
-        message: 'Member account is inactive',
-      } as ApiResponse<null>);
-      return;
-    }
-
-    // Validate OTP type based on member status
-    if (type === 'INITIAL_SETUP' && !member.isFirstTimeLogin) {
-      res.status(400).json({
-        success: false,
-        message: 'Account setup is already completed',
-      } as ApiResponse<null>);
-      return;
-    }
-
-    if (type === 'LOGIN' && member.isFirstTimeLogin) {
-      res.status(400).json({
-        success: false,
-        message: 'Please complete initial setup first',
-      } as ApiResponse<null>);
-      return;
-    }
-
-    await sendMemberOTP(member.id, type as any);
-
-    res.status(200).json({
-      success: true,
-      message: `New ${type.toLowerCase().replace('_', ' ')} OTP sent successfully`,
-    } as ApiResponse<null>);
-
-  } catch (error) {
-    console.error('Request OTP error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-    } as ApiResponse<null>);
-  }
-};
-
 // Change password (for logged-in members)
 export const changeMemberPassword = async (req: AuthenticatedMemberRequest, res: Response): Promise<void> => {
   try {
@@ -784,7 +719,6 @@ export const getMemberProfile = async (req: AuthenticatedMemberRequest, res: Res
       return;
     }
 
-    // Format the response according to the new structure
     const profileData = {
       pgDetails: {
         pgName: member.pg?.name || 'N/A',
@@ -796,7 +730,8 @@ export const getMemberProfile = async (req: AuthenticatedMemberRequest, res: Res
       },
       personalInfo: {
         name: member.name,
-        age: member.age,
+        age: calculateAge(member.dob),
+        dob: member.dob,
         gender: member.gender,
         workType: member.work,
       },
@@ -826,7 +761,7 @@ export const getMemberProfile = async (req: AuthenticatedMemberRequest, res: Res
 export const updateMemberProfile = async (req: AuthenticatedMemberRequest, res: Response): Promise<void> => {
   try {
     const memberId = req.member?.id;
-    const { name, age, phone, location, work } = req.body;
+    const { name, dob, phone, location, work } = req.body;
 
     if (!memberId) {
       res.status(401).json({
@@ -867,7 +802,7 @@ export const updateMemberProfile = async (req: AuthenticatedMemberRequest, res: 
     // Build update data object with only provided fields
     const updateData: any = {};
     if (name !== undefined) updateData.name = name.trim();
-    if (age !== undefined) updateData.age = age;
+    if (dob !== undefined) updateData.dob = new Date(dob);
     if (phone !== undefined) updateData.phone = phone;
     if (location !== undefined) updateData.location = location.trim();
     if (work !== undefined) updateData.work = work.trim();
@@ -895,7 +830,6 @@ export const updateMemberProfile = async (req: AuthenticatedMemberRequest, res: 
       },
     });
 
-    // Format the response according to the profile structure
     const profileData = {
       pgDetails: {
         pgName: updatedMember.pg?.name || 'N/A',
@@ -907,7 +841,8 @@ export const updateMemberProfile = async (req: AuthenticatedMemberRequest, res: 
       },
       personalInfo: {
         name: updatedMember.name,
-        age: updatedMember.age,
+        age: calculateAge(updatedMember.dob),
+        dob: updatedMember.dob,
         gender: updatedMember.gender,
         workType: updatedMember.work,
       },

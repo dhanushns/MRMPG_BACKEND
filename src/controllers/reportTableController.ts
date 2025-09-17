@@ -8,7 +8,7 @@ import {
   calculateRoomUtilization,
   calculatePaymentAnalytics,
   calculateFinancialSummary,
-} from "../utils/reportCalculators";
+} from "../utils/pgReportCalculators";
 
 // Get weekly PG performance table data
 export const getWeeklyPGPerformance = async (

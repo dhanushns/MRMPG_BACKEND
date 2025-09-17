@@ -19,7 +19,7 @@ export const validatePersonalData = async (
   try {
     const {
       name,
-      age,
+      dob,
       gender,
       phone,
       email,
@@ -27,12 +27,52 @@ export const validatePersonalData = async (
     }: PersonalDataValidation = req.body;
 
     // Validate required fields
-    if (!name || !age || !gender || !phone || !email || !location) {
+    if (!name || !dob || !gender || !phone || !email || !location) {
       res.status(400).json({
         success: false,
         message: "All personal data fields are required",
         error:
-          "Missing required fields: name, age, gender, phone, email, location",
+          "Missing required fields: name, dob, gender, phone, email, location",
+      });
+      return;
+    }
+
+    // Validate date of birth format and logic
+    const dobDate = new Date(dob);
+    if (isNaN(dobDate.getTime())) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid date of birth format",
+        error: "Date of birth must be a valid ISO date string",
+        field: "dob",
+      });
+      return;
+    }
+
+    // Check if date of birth is not in the future
+    if (dobDate > new Date()) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid date of birth",
+        error: "Date of birth cannot be in the future",
+        field: "dob",
+      });
+      return;
+    }
+
+    // Check if person is at least 16 years old (minimum age for PG)
+    const minAge = 16;
+    const today = new Date();
+    const age = today.getFullYear() - dobDate.getFullYear();
+    const monthDiff = today.getMonth() - dobDate.getMonth();
+    const isOldEnough = age > minAge || (age === minAge && monthDiff >= 0 && today.getDate() >= dobDate.getDate());
+
+    if (!isOldEnough) {
+      res.status(400).json({
+        success: false,
+        message: "Age requirement not met",
+        error: `Minimum age requirement is ${minAge} years`,
+        field: "dob",
       });
       return;
     }
@@ -80,7 +120,7 @@ export const validatePersonalData = async (
       message: "Personal data validation successful",
       data: {
         name,
-        age,
+        dob,
         gender,
         phone,
         location,
@@ -109,7 +149,7 @@ export const completeRegistration = async (
     // Parse the registration data from form data
     const registrationData: CreateMemberRequest = {
       name: req.body.name,
-      age: parseInt(req.body.age),
+      dob: req.body.dob,
       gender: req.body.gender as Gender,
       phone: req.body.phone,
       location: req.body.location,
@@ -124,7 +164,7 @@ export const completeRegistration = async (
     // Validate required fields
     const requiredFields = [
       "name",
-      "age",
+      "dob",
       "gender",
       "phone",
       "location",
@@ -149,6 +189,64 @@ export const completeRegistration = async (
         success: false,
         message: "Missing required fields",
         error: `Required fields missing: ${missingFields.join(", ")}`,
+      });
+      return;
+    }
+
+    // Validate date of birth
+    const dobDate = new Date(registrationData.dob);
+    if (isNaN(dobDate.getTime())) {
+      // Clean up uploaded files if validation fails
+      if (profileImage)
+        await deleteImage(profileImage.filename, ImageType.PROFILE);
+      if (documentImage)
+        await deleteImage(documentImage.filename, ImageType.DOCUMENT);
+
+      res.status(400).json({
+        success: false,
+        message: "Invalid date of birth format",
+        error: "Date of birth must be a valid ISO date string",
+        field: "dob",
+      });
+      return;
+    }
+
+    // Check if date of birth is not in the future
+    if (dobDate > new Date()) {
+      // Clean up uploaded files if validation fails
+      if (profileImage)
+        await deleteImage(profileImage.filename, ImageType.PROFILE);
+      if (documentImage)
+        await deleteImage(documentImage.filename, ImageType.DOCUMENT);
+
+      res.status(400).json({
+        success: false,
+        message: "Invalid date of birth",
+        error: "Date of birth cannot be in the future",
+        field: "dob",
+      });
+      return;
+    }
+
+    // Check if person is at least 16 years old (minimum age for PG)
+    const minAge = 16;
+    const today = new Date();
+    const age = today.getFullYear() - dobDate.getFullYear();
+    const monthDiff = today.getMonth() - dobDate.getMonth();
+    const isOldEnough = age > minAge || (age === minAge && monthDiff >= 0 && today.getDate() >= dobDate.getDate());
+
+    if (!isOldEnough) {
+      // Clean up uploaded files if validation fails
+      if (profileImage)
+        await deleteImage(profileImage.filename, ImageType.PROFILE);
+      if (documentImage)
+        await deleteImage(documentImage.filename, ImageType.DOCUMENT);
+
+      res.status(400).json({
+        success: false,
+        message: "Age requirement not met",
+        error: `Minimum age requirement is ${minAge} years`,
+        field: "dob",
       });
       return;
     }
@@ -245,7 +343,7 @@ export const completeRegistration = async (
     const newRegisteredMember = await prisma.registeredMember.create({
       data: {
         name: registrationData.name,
-        age: registrationData.age,
+        dob: new Date(registrationData.dob),
         gender: registrationData.gender,
         location: registrationData.location,
         pgLocation: registrationData.pgLocation,

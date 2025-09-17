@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { 
   getAllLeavingRequests,
-  approveOrRejectRequest 
+  approveOrRejectRequest,
+  recalculateLeavingRequestDues
 } from '../controllers/leavingRequestController';
 import { authenticateAdmin, authorizeAdmin } from '../middlewares/auth';
 import { validateBody, validateQuery } from '../middlewares/validation';
@@ -9,6 +10,7 @@ import {
   getAllLeavingRequestsSchema,
   approveOrRejectRequestSchema 
 } from '../validations/leavingRequestValidation';
+import { paymentImageUpload } from '../utils/imageUpload';
 
 const router = Router();
 
@@ -23,9 +25,21 @@ router.get(
 );
 
 router.patch(
-  '/:id/approve-reject',
+  '/:id/ONLINE',
+  paymentImageUpload.single('settlementProof'),
   validateBody(approveOrRejectRequestSchema),
   approveOrRejectRequest
+);
+
+router.patch(
+  '/:id/CASH',
+  validateBody(approveOrRejectRequestSchema),
+  approveOrRejectRequest
+);
+
+router.patch(
+  '/:id/recalculate-dues',
+  recalculateLeavingRequestDues
 );
 
 export default router;

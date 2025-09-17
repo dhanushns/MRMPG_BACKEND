@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { authenticateAdmin, authorizeAdmin } from "../middlewares/auth";
 import {
-  getApprovalStats,
   getDashboardStats,
   getEnquiryStats,
   getExpenseStats,
+  getLeavingRequestStats,
+  getPaymentStats,
+  getRegistrationStats,
   getRoomStats,
 } from "../controllers/statsController";
 import { validateParams, validateQuery } from "../middlewares/validation";
@@ -19,7 +21,9 @@ router.use(authorizeAdmin);
 
 router.get("/dashboard", getDashboardStats);
 
-router.get("/approvals", getApprovalStats);
+router.get("/approvals/pending_registration",getRegistrationStats);
+router.get("/approvals/pending_payment", getPaymentStats);
+router.get("/approvals/relieving_requests", getLeavingRequestStats);
 
 // GET Room stats - defaults to first PG if no pgId provided
 router.get("/rooms", getRoomStats);

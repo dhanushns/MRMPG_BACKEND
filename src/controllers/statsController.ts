@@ -510,8 +510,167 @@ const formatApprovalCards = (
   };
 };
 
-// Get approval statistics in card format (only fetch and format)
-export const getApprovalStats = async (
+// Get registration statistics in card format
+export const getRegistrationStats = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Get admin details to know their pgType
+    const admin = await prisma.admin.findUnique({
+      where: { id: req.admin.id },
+      select: { pgType: true },
+    });
+
+    if (!admin) {
+      res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Get current month and year
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+
+    // Get all PGs of admin's type
+    const pgs = await prisma.pG.findMany({
+      where: { type: admin.pgType },
+      select: { id: true },
+    });
+
+    const pgIds = pgs.map((pg) => pg.id);
+
+    // Calculate registration statistics dynamically
+    const [
+      totalPendingRequests,
+      longTermRequests,
+      shortTermRequests,
+      thisMonthRegistrations,
+    ] = await Promise.all([
+      // Total pending registration requests for this PG type
+      prisma.registeredMember.count({
+        where: { pgType: admin.pgType },
+      }),
+
+      // Long term requests for this PG type
+      prisma.registeredMember.count({
+        where: {
+          pgType: admin.pgType,
+          rentType: "LONG_TERM",
+        },
+      }),
+
+      // Short term requests for this PG type
+      prisma.registeredMember.count({
+        where: {
+          pgType: admin.pgType,
+          rentType: "SHORT_TERM",
+        },
+      }),
+
+      // This month registrations (approved members created this month) across all PGs of this type
+      prisma.member.count({
+        where: {
+          pgId: { in: pgIds },
+          createdAt: {
+            gte: new Date(currentYear, currentMonth - 1, 1),
+            lt: new Date(currentYear, currentMonth, 1),
+          },
+        },
+      }),
+    ]);
+
+    // Format currency
+    const formatNumber = (num: number): string => {
+      return num.toLocaleString("en-IN");
+    };
+
+    // Get month name
+    const monthNames = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ];
+
+    const cards = [
+      {
+        title: "Pending Registration Requests",
+        value: formatNumber(totalPendingRequests),
+        icon: "userCheck",
+        color: totalPendingRequests > 0 ? "warning" : "success",
+        subtitle: `For ${admin.pgType.toLowerCase()}'s PG`,
+        ...(totalPendingRequests > 0 && {
+          badge: {
+            text: "Action Required",
+            color: "error",
+          },
+          onClickRoute: "/admin/approvals/registrations",
+        }),
+      },
+      {
+        title: "Long Term Requests",
+        value: formatNumber(longTermRequests),
+        icon: "calendar",
+        color: "primary",
+        subtitle: `${Math.round(
+          (longTermRequests / Math.max(totalPendingRequests, 1)) * 100
+        )}% of total requests`,
+      },
+      {
+        title: "Short Term Requests",
+        value: formatNumber(shortTermRequests),
+        icon: "clock",
+        color: "secondary",
+        subtitle: `${Math.round(
+          (shortTermRequests / Math.max(totalPendingRequests, 1)) * 100
+        )}% of total requests`,
+      },
+      {
+        title: "Approved This Month",
+        value: formatNumber(thisMonthRegistrations),
+        icon: "userPlus",
+        color: "success",
+        subtitle: `${monthNames[currentMonth - 1]} ${currentYear}`,
+      },
+    ];
+
+    res.status(200).json({
+      success: true,
+      message: "Registration statistics retrieved successfully",
+      data: { cards }
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error("Error getting registration stats:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: "Failed to retrieve registration statistics",
+    } as ApiResponse<null>);
+  }
+};
+
+// Get payment statistics in card format
+export const getPaymentStats = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => {
@@ -580,8 +739,9 @@ export const getApprovalStats = async (
     });
 
     // Calculate payment statistics dynamically for the requested month/year and filtered PGs
-    const [pendingPaymentApprovals, totalApprovedAmount, overduePayments] =
+    const [pendingPaymentApprovals, overduePayments, totalAmountDue] =
       await Promise.all([
+        // Pending payment approvals: Members who paid but awaiting admin approval
         prisma.payment.count({
           where: {
             pgId: { in: pgIds },
@@ -592,18 +752,6 @@ export const getApprovalStats = async (
           },
         }),
 
-        prisma.payment
-          .aggregate({
-            where: {
-              pgId: { in: pgIds },
-              month: requestedMonth,
-              year: requestedYear,
-              approvalStatus: "APPROVED",
-            },
-            _sum: { amount: true },
-          })
-          .then((result) => result._sum?.amount || 0),
-
         // Overdue payments: Members who didn't pay after overdue date in requested month
         prisma.payment.count({
           where: {
@@ -613,115 +761,109 @@ export const getApprovalStats = async (
             paymentStatus: "OVERDUE",
           },
         }),
+
+        // Total amount due: Sum of all payments that are not yet approved (including PENDING, OVERDUE payments)
+        prisma.payment
+          .aggregate({
+            where: {
+              pgId: { in: pgIds },
+              month: requestedMonth,
+              year: requestedYear,
+              approvalStatus: { in: ["PENDING", "REJECTED"] }, // Only pending or rejected payments
+              paymentStatus: { in: ["PENDING", "OVERDUE", "PAID"] }, // All payment statuses except approved
+            },
+            _sum: { amount: true },
+          })
+          .then((result) => result._sum?.amount || 0),
       ]);
 
-    // Calculate total amount due based on actual payment records for the requested month
-    // This ensures we use the correct amounts for both long-term and short-term members
-    const totalAmountDue = await prisma.payment
-      .aggregate({
-        where: {
-          pgId: { in: pgIds },
-          month: requestedMonth,
-          year: requestedYear,
-          // Only count payments that are still due (not yet approved)
-          approvalStatus: { not: "APPROVED" },
-        },
-        _sum: { amount: true },
-      })
-      .then((result) => result._sum?.amount || 0);
+    // Format currency
+    const formatCurrency = (amount: number): string => {
+      return `${amount.toLocaleString("en-IN")}`;
+    };
 
-    // Calculate registration statistics dynamically for the requested month/year
-    const [
-      totalPendingRequests,
-      longTermRequests,
-      shortTermRequests,
-      thisMonthRegistrations,
-    ] = await Promise.all([
-      // Total pending registration requests for this PG type
-      prisma.registeredMember.count({
-        where: { pgType: admin.pgType },
-      }),
+    // Format number with commas
+    const formatNumber = (num: number): string => {
+      return num.toLocaleString("en-IN");
+    };
 
-      // Long term requests for this PG type
-      prisma.registeredMember.count({
-        where: {
-          pgType: admin.pgType,
-          rentType: "LONG_TERM",
-        },
-      }),
+    // Get month name
+    const monthNames = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ];
 
-      // Short term requests for this PG type
-      prisma.registeredMember.count({
-        where: {
-          pgType: admin.pgType,
-          rentType: "SHORT_TERM",
-        },
-      }),
-
-      // This month registrations (approved members created this month) across all PGs of this type
-      prisma.member.count({
-        where: {
-          pgId: { in: pgIds },
-          createdAt: {
-            gte: new Date(requestedYear, requestedMonth - 1, 1),
-            lt: new Date(requestedYear, requestedMonth, 1),
+    const cards = [
+      {
+        title: "Pending Payment Approvals",
+        value: formatNumber(pendingPaymentApprovals),
+        icon: "clock",
+        color:
+          pendingPaymentApprovals > 0
+            ? "warning"
+            : pendingPaymentApprovals === 0
+            ? "neutral"
+            : "success",
+        subtitle: `Members who paid but awaiting admin approval for ${
+          monthNames[requestedMonth - 1]
+        } ${requestedYear}`,
+        ...(pendingPaymentApprovals > 0 && {
+          badge: {
+            text: "Action Required",
+            color: "error",
           },
-        },
-      }),
-    ]);
-
-    // Create registration stats object for formatting
-    const registrationStats = [
+        }),
+      },
       {
-        totalPendingRequests,
-        longTermRequests,
-        shortTermRequests,
-        thisMonthRegistrations,
+        title: "Total Amount Due",
+        value: formatCurrency(totalAmountDue),
+        icon: "indianRupee",
+        color: "warning",
+        subtitle: `Total amount that needs to be paid for ${
+          monthNames[requestedMonth - 1]
+        } ${requestedYear}`,
+      },
+      {
+        title: "Overdue Payments",
+        value: formatNumber(overduePayments),
+        icon: "alertTriangle",
+        color: overduePayments > 0 ? "error" : "success",
+        subtitle:
+          overduePayments > 0
+            ? `Members who didn't pay after due date for ${
+                monthNames[requestedMonth - 1]
+              } ${requestedYear}`
+            : "No overdue payments",
+        ...(overduePayments > 0 && {
+          badge: {
+            text: "Critical",
+            color: "error",
+          },
+        }),
       },
     ];
-
-    // Create payment stats object for formatting
-    const paymentStats = [
-      {
-        totalPendingPayments: pendingPaymentApprovals,
-        totalAmountPending: totalAmountDue,
-        totalOverduePayments: overduePayments,
-        thisMonthPendingPaymentCount: 0,
-      },
-    ];
-
-    const lastUpdatedRegistration = new Date();
-    const lastUpdatedPayment = new Date();
-    // Format cards using helper function
-    const cards = formatApprovalCards(
-      admin,
-      registrationStats,
-      paymentStats,
-      requestedMonth,
-      requestedYear
-    );
 
     res.status(200).json({
       success: true,
-      message: "Approval statistics retrieved successfully",
-      data: {
-        cards,
-        lastUpdated: {
-          registration: lastUpdatedRegistration,
-          payment: lastUpdatedPayment,
-        },
-        count: {
-          registrationPending: totalPendingRequests,
-          pendingApprovals: pendingPaymentApprovals,
-        },
-      },
+      message: "Payment statistics retrieved successfully",
+      data: { cards }
     } as ApiResponse<any>);
   } catch (error) {
-    console.error("Error getting approval stats:", error);
+    console.error("Error getting payment stats:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
-      error: "Failed to retrieve approval statistics",
+      error: "Failed to retrieve payment statistics",
     } as ApiResponse<null>);
   }
 };
@@ -1161,6 +1303,171 @@ export const getExpenseStats = async (req: AuthenticatedRequest, res: Response) 
       success: false,
       message: 'Failed to retrieve expense statistics',
       error: error instanceof Error ? error.message : 'Unknown error'
+    } as ApiResponse<null>);
+  }
+};
+
+// Get leaving request statistics in card format
+export const getLeavingRequestStats = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!req.admin) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Get admin details to know their pgType
+    const admin = await prisma.admin.findUnique({
+      where: { id: req.admin.id },
+      select: { pgType: true },
+    });
+
+    if (!admin) {
+      res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Get all PGs of admin's type
+    const pgs = await prisma.pG.findMany({
+      where: { type: admin.pgType },
+      select: { id: true },
+    });
+
+    const pgIds = pgs.map((pg) => pg.id);
+
+    // Get current month and year for "this month" calculations
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+
+    // Calculate leaving request statistics dynamically
+    const [
+      totalPendingRequests,
+      totalApprovedRequests,
+      totalRejectedRequests,
+      thisMonthRequests,
+    ] = await Promise.all([
+      // Total pending leaving requests
+      prisma.leavingRequest.count({
+        where: {
+          pgId: { in: pgIds },
+          status: "PENDING",
+        },
+      }),
+
+      // Total approved leaving requests
+      prisma.leavingRequest.count({
+        where: {
+          pgId: { in: pgIds },
+          status: "APPROVED",
+        },
+      }),
+
+      // Total rejected leaving requests
+      prisma.leavingRequest.count({
+        where: {
+          pgId: { in: pgIds },
+          status: "REJECTED",
+        },
+      }),
+
+      // This month leaving requests (all statuses)
+      prisma.leavingRequest.count({
+        where: {
+          pgId: { in: pgIds },
+          createdAt: {
+            gte: new Date(currentYear, currentMonth - 1, 1),
+            lt: new Date(currentYear, currentMonth, 1),
+          },
+        },
+      }),
+    ]);
+
+    // Calculate total requests for percentage calculations
+    const totalRequests = totalPendingRequests + totalApprovedRequests + totalRejectedRequests;
+
+    // Format number with commas
+    const formatNumber = (num: number): string => {
+      return num.toLocaleString("en-IN");
+    };
+
+    // Get month name
+    const monthNames = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ];
+
+    const cards = [
+      {
+        title: "Pending Leaving Requests",
+        value: formatNumber(totalPendingRequests),
+        icon: "clock",
+        color: totalPendingRequests > 0 ? "warning" : "success",
+        subtitle: `For ${admin.pgType.toLowerCase()}'s PG`,
+        ...(totalPendingRequests > 0 && {
+          badge: {
+            text: "Action Required",
+            color: "error",
+          },
+          onClickRoute: "/admin/approvals/leaving-requests",
+        }),
+      },
+      {
+        title: "Approved Requests",
+        value: formatNumber(totalApprovedRequests),
+        icon: "checkCircle2",
+        color: totalApprovedRequests > 0 ? "success" : "neutral",
+        subtitle: `${Math.round(
+          (totalApprovedRequests / Math.max(totalRequests, 1)) * 100
+        )}% of total requests`,
+      },
+      {
+        title: "Rejected Requests",
+        value: formatNumber(totalRejectedRequests),
+        icon: "xCircle",
+        color: totalRejectedRequests > 0 ? "error" : "neutral",
+        subtitle: `${Math.round(
+          (totalRejectedRequests / Math.max(totalRequests, 1)) * 100
+        )}% of total requests`,
+      },
+      {
+        title: "This Month Requests",
+        value: formatNumber(thisMonthRequests),
+        icon: "calendar",
+        color: "primary",
+        subtitle: `${monthNames[currentMonth - 1]} ${currentYear}`,
+      },
+    ];
+
+    res.status(200).json({
+      success: true,
+      message: "Leaving request statistics retrieved successfully",
+      data: { cards }
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error("Error getting leaving request stats:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: "Failed to retrieve leaving request statistics",
     } as ApiResponse<null>);
   }
 };

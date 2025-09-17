@@ -11,7 +11,7 @@ import {
   sendEmail,
   createApprovalEmailContent,
   createRejectionEmailContent,
-} from "../utils/emailService";
+} from "../services/emailService";
 import { deleteImage, ImageType } from "../utils/imageUpload";
 
 // GET registered members of pgType
@@ -326,7 +326,7 @@ export const approveOrRejectMember = async (
         data: {
           memberId: uniqueMemberId,
           name: registeredMember.name,
-          age: registeredMember.age,
+          dob: registeredMember.dob,
           gender: registeredMember.gender,
           location: registeredMember.location,
           email: registeredMember.email,
@@ -489,8 +489,6 @@ export const approveOrRejectMember = async (
             expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
           },
         });
-
-        console.log(`Initial setup OTP generated for long-term member: ${result.email}`);
       }
 
       const emailContent = createApprovalEmailContent(

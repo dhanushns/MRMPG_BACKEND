@@ -6,7 +6,7 @@ import { Gender, RentType, PgType } from "@prisma/client";
 // Personal data validation schema (Step 1)
 export const validatePersonalDataSchema = Joi.object({
   name: Joi.string().required().min(2).max(100).trim(),
-  age: Joi.number().integer().required().min(16).max(100),
+  dob: Joi.date().iso().required().max('now').min('1900-01-01'),
   gender: Joi.string().valid(...Object.values(Gender)).required(),
   phone: Joi.string().required().pattern(/^[0-9]{10}$/),
   location: Joi.string().required().min(2).max(200).trim(),
@@ -16,7 +16,7 @@ export const validatePersonalDataSchema = Joi.object({
 // Complete registration validation schema
 export const completeRegistrationSchema = Joi.object({
   name: Joi.string().required().min(2).max(100).trim(),
-  age: Joi.number().integer().required().min(16).max(100),
+  dob: Joi.date().iso().required().max('now').min('1900-01-01'),
   gender: Joi.string().valid(...Object.values(Gender)).required(),
   phone: Joi.string().required().pattern(/^[0-9]{10}$/),
   location: Joi.string().required().min(2).max(200).trim(),
@@ -292,10 +292,10 @@ export const validateOTPRequest = (req: Request, res: Response, next: NextFuncti
 
 // Validation for updating profile
 export const validateUpdateProfile = (req: Request, res: Response, next: NextFunction): void => {
-  const { name, age, phone, location, work } = req.body;
+  const { name, dob, phone, location, work } = req.body;
 
   // At least one field must be provided
-  if (!name && !age && !phone && !location && !work) {
+  if (!name && !dob && !phone && !location && !work) {
     res.status(400).json({
       success: false,
       message: "At least one field must be provided to update",
@@ -314,12 +314,36 @@ export const validateUpdateProfile = (req: Request, res: Response, next: NextFun
     }
   }
 
-  // Age validation (if provided)
-  if (age !== undefined) {
-    if (typeof age !== 'number' || !Number.isInteger(age) || age < 16 || age > 100) {
+  // Date of birth validation (if provided)
+  if (dob !== undefined) {
+    const dobDate = new Date(dob);
+    if (isNaN(dobDate.getTime())) {
       res.status(400).json({
         success: false,
-        message: "Age must be a number between 16 and 100",
+        message: "Invalid date of birth format",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    if (dobDate > new Date()) {
+      res.status(400).json({
+        success: false,
+        message: "Date of birth cannot be in the future",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Check minimum age (16 years)
+    const minAge = 16;
+    const today = new Date();
+    const age = today.getFullYear() - dobDate.getFullYear();
+    const monthDiff = today.getMonth() - dobDate.getMonth();
+    const isOldEnough = age > minAge || (age === minAge && monthDiff >= 0 && today.getDate() >= dobDate.getDate());
+
+    if (!isOldEnough) {
+      res.status(400).json({
+        success: false,
+        message: `Minimum age requirement is ${minAge} years`,
       } as ApiResponse<null>);
       return;
     }

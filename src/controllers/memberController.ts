@@ -759,8 +759,8 @@ export const getMemberDetails = async (
     const months = Math.floor((diffDays % 365) / 30);
     const days = diffDays % 30;
 
-    // Get all payments for accurate calculation
-    const allPayments = await prisma.payment.findMany({
+    // Get payment history with pagination - directly from Payment model
+    const paymentHistory = await prisma.payment.findMany({
       where: { memberId: member.id },
       select: {
         id: true,
@@ -772,136 +772,63 @@ export const getMemberDetails = async (
         paidDate: true,
         month: true,
         year: true,
+        paymentMethod: true,
+        attemptNumber: true,
+        rentBillScreenshot: true,
+        electricityBillScreenshot: true,
         createdAt: true,
-        rejectedReason: true,
       },
       orderBy: [{ year: "desc" }, { month: "desc" }, { createdAt: "desc" }],
+      skip: offset,
+      take: limit,
     });
 
-    // Get payment history with pagination
-    const paymentHistory = allPayments.slice(offset, offset + limit);
-
-    // Calculate payment summary based on member's individual billing cycles
-    let approvedPaymentsCount = 0;
-    let pendingPaymentsCount = 0;
-    let rejectedPaymentsCount = 0;
-    let overduePaymentsCount = 0;
-    let totalAmountPaid = 0;
-    let totalAmountPending = 0;
-    let totalAmountRejected = 0;
-    let totalAmountOverdue = 0;
-    let lastPaymentDate: Date | null = null;
-    let lastApprovedPayment: Date | null = null;
-
-    // Process existing payment records with improved logic
-    allPayments.forEach((payment) => {
-      const paymentDate = payment.paidDate ? new Date(payment.paidDate) : null;
-      const overdueDate = payment.overdueDate
-        ? new Date(payment.overdueDate)
-        : null;
-
-      // Update last payment date regardless of status
-      if (paymentDate && (!lastPaymentDate || paymentDate > lastPaymentDate)) {
-        lastPaymentDate = paymentDate;
-      }
-
-      // Categorize payments based on approval status
-      if (payment.approvalStatus === "APPROVED") {
-        approvedPaymentsCount++;
-        totalAmountPaid += payment.amount;
-
-        if (
-          paymentDate &&
-          (!lastApprovedPayment || paymentDate > lastApprovedPayment)
-        ) {
-          lastApprovedPayment = paymentDate;
-        }
-      } else if (payment.approvalStatus === "REJECTED") {
-        rejectedPaymentsCount++;
-        totalAmountRejected += payment.amount;
-
-        // Rejected payments are also overdue since they need to be paid again
-        overduePaymentsCount++;
-        totalAmountOverdue += payment.amount;
-      } else if (payment.approvalStatus === "PENDING") {
-        // Check if payment is overdue based on overdue date
-        const isOverdue =
-          payment.paymentStatus === "OVERDUE" ||
-          (overdueDate && now > overdueDate);
-
-        if (isOverdue) {
-          overduePaymentsCount++;
-          totalAmountOverdue += payment.amount;
-        } else {
-          pendingPaymentsCount++;
-          totalAmountPending += payment.amount;
-        }
-      } else {
-        // Handle null or other approval statuses
-        const isOverdue =
-          payment.paymentStatus === "OVERDUE" ||
-          (overdueDate && now > overdueDate);
-
-        if (isOverdue) {
-          overduePaymentsCount++;
-          totalAmountOverdue += payment.amount;
-        } else {
-          pendingPaymentsCount++;
-          totalAmountPending += payment.amount;
-        }
-      }
+    // Get total count for pagination
+    const totalPayments = await prisma.payment.count({
+      where: { memberId: member.id },
     });
 
-    // Get current payment status from database
-    const currentMonth = now.getMonth() + 1;
-    const currentYear = now.getFullYear();
-
-    // Find current month payment
-    const currentMonthPayment = allPayments.find((p) => {
-      return p.month === currentMonth && p.year === currentYear;
+    // Calculate simple payment summary
+    const paymentSummaryData = await prisma.payment.aggregate({
+      where: { memberId: member.id },
+      _sum: {
+        amount: true,
+      },
     });
 
-    // Determine current payment status from database
-    let currentPaymentStatus = "PENDING";
-    let isOverdue = false;
-    let currentDueDate: Date | null = null;
+    const totalAmountPaid = await prisma.payment.aggregate({
+      where: { 
+        memberId: member.id,
+        approvalStatus: "APPROVED"
+      },
+      _sum: {
+        amount: true,
+      },
+    });
 
-    if (currentMonthPayment) {
-      if (currentMonthPayment.approvalStatus === "APPROVED") {
-        currentPaymentStatus = "PAID";
-      } else if (currentMonthPayment.approvalStatus === "REJECTED") {
-        currentPaymentStatus = "OVERDUE";
-        isOverdue = true;
-      } else if (currentMonthPayment.paymentStatus === "OVERDUE") {
-        currentPaymentStatus = "OVERDUE";
-        isOverdue = true;
-      } else {
-        currentPaymentStatus = "PENDING";
-      }
-      currentDueDate = currentMonthPayment.dueDate
-        ? new Date(currentMonthPayment.dueDate)
-        : null;
-    }
+    const totalAmountPending = await prisma.payment.aggregate({
+      where: { 
+        memberId: member.id,
+        approvalStatus: "PENDING"
+      },
+      _sum: {
+        amount: true,
+      },
+    });
 
-    // Calculate expected payments for SHORT_TERM members
-    let expectedTotalAmount = 0;
-    if (
-      member.rentType === "SHORT_TERM" &&
-      member.pricePerDay &&
-      relievingDate
-    ) {
-      const stayDays = Math.ceil(
-        (relievingDate.getTime() - joiningDate.getTime()) /
-          (1000 * 60 * 60 * 24)
-      );
-      expectedTotalAmount = stayDays * member.pricePerDay;
-    } else if (member.rentType === "LONG_TERM" && member.room?.rent) {
-      // For long term, calculate based on months stayed
-      const monthsStayed = Math.floor(diffDays / 30) + 1; // +1 for current/partial month
-      expectedTotalAmount = monthsStayed * member.room.rent;
-    }
+    // Get the most recent due date
+    const latestPayment = await prisma.payment.findFirst({
+      where: { 
+        memberId: member.id,
+        approvalStatus: "PENDING"
+      },
+      select: {
+        dueDate: true,
+      },
+      orderBy: [{ year: "desc" }, { month: "desc" }],
+    });
 
-    // Format member data
+    // Format member data - remove unwanted calculations
     const { pg, room, ...memberData } = member;
     const formattedMember = {
       ...memberData,
@@ -913,49 +840,13 @@ export const getMemberDetails = async (
         years,
         totalDays: diffDays,
       },
-      currentPaymentStatus,
-      isCurrentlyOverdue: isOverdue,
-      expectedTotalAmount,
-      actualDays:
-        member.rentType === "SHORT_TERM" && relievingDate
-          ? Math.ceil(
-              (relievingDate.getTime() - joiningDate.getTime()) /
-                (1000 * 60 * 60 * 24)
-            )
-          : null,
     };
 
-    // Enhanced payment summary with additional insights
+    // Simplified payment summary - only keep required fields
     const paymentSummary = {
-      approvedPayments: approvedPaymentsCount,
-      pendingPayments: pendingPaymentsCount,
-      rejectedPayments: rejectedPaymentsCount,
-      overduePayments: overduePaymentsCount,
-      totalAmountPaid,
-      totalAmountPending,
-      totalAmountRejected,
-      totalAmountOverdue,
-      lastPaymentDate,
-      lastApprovedPayment,
-      currentDueDate,
-      nextDueDate: null, // No longer calculated
-      paymentEfficiency:
-        approvedPaymentsCount /
-        Math.max(
-          1,
-          approvedPaymentsCount + rejectedPaymentsCount + overduePaymentsCount
-        ),
-      outstandingAmount:
-        totalAmountPending + totalAmountOverdue + totalAmountRejected,
-      expectedVsActual: {
-        expected: expectedTotalAmount,
-        paid: totalAmountPaid,
-        pending: totalAmountPending + totalAmountOverdue,
-        percentage:
-          expectedTotalAmount > 0
-            ? (totalAmountPaid / expectedTotalAmount) * 100
-            : 0,
-      },
+      totalAmountPaid: totalAmountPaid._sum.amount || 0,
+      totalAmountPending: totalAmountPending._sum.amount || 0,
+      dueDate: latestPayment?.dueDate || null,
     };
 
     res.status(200).json({
@@ -968,8 +859,8 @@ export const getMemberDetails = async (
           pagination: {
             page,
             limit,
-            total: allPayments.length,
-            totalPages: Math.ceil(allPayments.length / limit),
+            total: totalPayments,
+            totalPages: Math.ceil(totalPayments / limit),
           },
         },
         paymentSummary,

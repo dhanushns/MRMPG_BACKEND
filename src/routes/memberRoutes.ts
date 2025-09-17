@@ -8,6 +8,7 @@ import { authenticateAdmin, authorizeAdmin } from "../middlewares/auth";
 import { validateQuery } from "../middlewares/validation";
 import { memberQuerySchema } from "../validations/memberValidation";
 import { getAllMembersQuerySchema } from "../validations/dashboardValidation";
+import { getMemberReport } from "../controllers/memberReportController";
 
 const router = Router();
 
@@ -23,5 +24,7 @@ router.get(
   validateQuery(memberQuerySchema),
   getMembersByRentType
 );
+
+router.get("/report/:memberId", getMemberReport);
 
 export default router;

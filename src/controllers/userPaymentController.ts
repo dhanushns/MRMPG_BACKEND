@@ -2,19 +2,53 @@ import { Request, Response } from "express";
 import prisma from "../config/prisma";
 import { ApiResponse } from "../types/response";
 import { AuthenticatedMemberRequest } from "./userController";
+import { PaymentMethod } from "@prisma/client";
 
-// Upload payment
+// Upload payment 
 export const uploadPayment = async (req: AuthenticatedMemberRequest, res: Response): Promise<void> => {
   try {
     const memberId = req.member?.id;
-    const { 
-      amount, 
-      paymentMethod, 
-      month, 
-      year,
-      rentBillScreenshot,
-      electricityBillScreenshot 
-    } = req.body;
+    const { amount, month, year, paymentMethod } = req.body;
+    
+    // Type cast amount, month and year to numbers
+    const amountNumber = parseFloat(amount);
+    const monthNumber = parseInt(month);
+    const yearNumber = parseInt(year);
+
+    // Validate amount, month and year
+    if (isNaN(amountNumber) || amountNumber <= 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid amount. Amount must be a positive number',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Validate month and year
+    if (isNaN(monthNumber) || monthNumber < 1 || monthNumber > 12) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid month. Month must be between 1 and 12',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    if (isNaN(yearNumber) || yearNumber < 2000 || yearNumber > new Date().getFullYear() + 1) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid year',
+      } as ApiResponse<null>);
+      return;
+    }
+
+    // Validate payment method
+    if (!paymentMethod || !['CASH', 'ONLINE'].includes(paymentMethod)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid payment method. Must be CASH or ONLINE',
+      } as ApiResponse<null>);
+      return;
+    }
 
     if (!memberId) {
       res.status(401).json({
@@ -57,122 +91,212 @@ export const uploadPayment = async (req: AuthenticatedMemberRequest, res: Respon
       return;
     }
 
-    // Check if payment already exists for this month/year
-    const existingPayment = await prisma.payment.findFirst({
-      where: {
-        memberId: memberId,
-        month: month,
-        year: year,
-      },
-      orderBy: {
-        attemptNumber: 'desc',
-      },
-    });
-
-    // Determine attempt number
-    let attemptNumber = 1;
-    if (existingPayment) {
-      if (existingPayment.paymentStatus === 'PENDING' && existingPayment.approvalStatus === 'PENDING') {
-        // Update existing payment
-        const updatedPayment = await prisma.payment.update({
-          where: { id: existingPayment.id },
-          data: {
-            amount: amount,
-            paymentMethod: paymentMethod,
-            rentBillScreenshot: paymentMethod === 'ONLINE' ? rentBillScreenshot : null,
-            electricityBillScreenshot: paymentMethod === 'ONLINE' ? electricityBillScreenshot : null,
-            paidDate: new Date(),
-            updatedAt: new Date(),
-          },
-        });
-
-        res.status(200).json({
-          success: true,
-          message: 'Payment updated successfully',
-          data: {
-            paymentId: updatedPayment.id,
-            amount: updatedPayment.amount,
-            paymentMethod: updatedPayment.paymentMethod,
-            month: updatedPayment.month,
-            year: updatedPayment.year,
-            attemptNumber: updatedPayment.attemptNumber,
-            status: 'Updated - Pending Approval',
-          },
-        } as ApiResponse<any>);
-        return;
-      } else {
-        // Create new attempt
-        attemptNumber = existingPayment.attemptNumber + 1;
-      }
-    }
-
-    // Use existing payment's due dates if available, otherwise calculate new ones
-    let dueDate: Date;
-    let overdueDate: Date;
+    // Handle file uploads only for ONLINE payment method
+    let rentBillScreenshot = null;
+    let electricityBillScreenshot = null;
     
-    if (existingPayment) {
-      // Use the same due dates from existing payment for this month/year
-      dueDate = existingPayment.dueDate;
-      overdueDate = existingPayment.overdueDate;
-    } else {
-      // Calculate due dates based on member's joining date
-      const joiningDate = member.dateOfJoining;
-      const joiningDay = joiningDate.getDate();
-      
-      // Due date is on the same day as joining date in the payment month
-      dueDate = new Date(year, month - 1, joiningDay);
-      
-      if (dueDate.getMonth() !== month - 1) {
-        dueDate = new Date(year, month, 0); // Last day of the payment month
-      }
-      
-      // Overdue date is 7 days after due date
-      overdueDate = new Date(dueDate);
-      overdueDate.setDate(dueDate.getDate() + 7);
+    if (paymentMethod === "ONLINE") {
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+      rentBillScreenshot = files.rentBillScreenshot ? `/uploads/payment/${files.rentBillScreenshot[0].filename}` : null;
+      electricityBillScreenshot = files.electricityBillScreenshot ? `/uploads/payment/${files.electricityBillScreenshot[0].filename}` : null;
     }
 
-    // Create new payment record
-    const payment = await prisma.payment.create({
-      data: {
-        memberId: memberId,
-        pgId: member.pgId,
-        month: month,
-        year: year,
-        amount: amount,
-        dueDate: dueDate,
-        overdueDate: overdueDate,
-        rentBillScreenshot: paymentMethod === 'ONLINE' ? rentBillScreenshot : null,
-        electricityBillScreenshot: paymentMethod === 'ONLINE' ? electricityBillScreenshot : null,
-        paidDate: new Date(),
-        paymentMethod: paymentMethod,
-        attemptNumber: attemptNumber,
-        paymentStatus: 'PAID',
-        approvalStatus: 'PENDING',
-      },
-    });
+    const paymentData = await createPaymentRecord(
+      memberId, 
+      member.pgId, 
+      amountNumber, 
+      paymentMethod as PaymentMethod, 
+      monthNumber, 
+      yearNumber, 
+      rentBillScreenshot, 
+      electricityBillScreenshot
+    );
 
     res.status(201).json({
       success: true,
-      message: 'Payment uploaded successfully and is pending approval',
-      data: {
-        paymentId: payment.id,
-        amount: payment.amount,
-        paymentMethod: payment.paymentMethod,
-        month: payment.month,
-        year: payment.year,
-        attemptNumber: payment.attemptNumber,
-        status: 'Paid - Pending Approval',
-        paidDate: payment.paidDate,
-      },
+      message: `${paymentMethod.toLowerCase()} payment uploaded successfully and is pending approval`,
+      data: paymentData,
     } as ApiResponse<any>);
 
   } catch (error) {
     console.error('Upload payment error:', error);
+    
+    // Handle specific payment creation errors
+    if (error instanceof Error) {
+      if (error.message.includes('Payment already exists for this month and is pending approval')) {
+        res.status(409).json({
+          success: false,
+          message: 'Payment already exists for this month and is pending approval. Cannot create new payment.',
+        } as ApiResponse<null>);
+        return;
+      }
+      
+      if (error.message.includes('Payment for this month has already been approved')) {
+        res.status(409).json({
+          success: false,
+          message: 'Payment for this month has already been approved. Cannot create new payment.',
+        } as ApiResponse<null>);
+        return;
+      }
+      
+      if (error.message.includes('Cannot create new payment. Previous payment is still being processed')) {
+        res.status(409).json({
+          success: false,
+          message: 'Cannot create new payment. Previous payment is still being processed.',
+        } as ApiResponse<null>);
+        return;
+      }
+    }
+    
     res.status(500).json({
       success: false,
       message: 'Internal server error',
     } as ApiResponse<null>);
   }
+};
+
+// Helper function to create payment record
+const createPaymentRecord = async (
+  memberId: string,
+  pgId: string,
+  amount: number,
+  paymentMethod: PaymentMethod,
+  month: number,
+  year: number,
+  rentBillScreenshot: string | null,
+  electricityBillScreenshot: string | null
+) => {
+  // Check if payment already exists for this month/year
+  const existingPayment = await prisma.payment.findFirst({
+    where: {
+      memberId: memberId,
+      month: month,
+      year: year,
+    },
+    orderBy: {
+      attemptNumber: 'desc',
+    },
+  });
+
+  // Determine attempt number and handle existing payment logic
+  let attemptNumber = 1;
+  if (existingPayment) {
+    // If payment is PAID and approval is PENDING, don't allow new payment
+    if (existingPayment.paymentStatus === 'PAID' && existingPayment.approvalStatus === 'PENDING') {
+      throw new Error('Payment already exists for this month and is pending approval. Cannot create new payment.');
+    }
+    
+    // If payment is PAID and approval is APPROVED, don't allow new payment
+    if (existingPayment.paymentStatus === 'PAID' && existingPayment.approvalStatus === 'APPROVED') {
+      throw new Error('Payment for this month has already been approved. Cannot create new payment.');
+    }
+
+    // If payment status is PENDING and approval is PENDING, update existing payment
+    if (existingPayment.paymentStatus === 'PENDING' && existingPayment.approvalStatus === 'PENDING') {
+      // Update existing payment
+      const updatedPayment = await prisma.payment.update({
+        where: { id: existingPayment.id },
+        data: {
+          amount: amount,
+          paymentMethod: paymentMethod,
+          rentBillScreenshot: rentBillScreenshot,
+          electricityBillScreenshot: electricityBillScreenshot,
+          paymentStatus: "PAID",
+          paidDate: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+
+      return {
+        paymentId: updatedPayment.id,
+        amount: updatedPayment.amount,
+        paymentMethod: updatedPayment.paymentMethod,
+        month: updatedPayment.month,
+        year: updatedPayment.year,
+        attemptNumber: updatedPayment.attemptNumber,
+        status: 'Updated - Pending Approval',
+        paidDate: updatedPayment.paidDate,
+        rentBillScreenshot: updatedPayment.rentBillScreenshot,
+        electricityBillScreenshot: updatedPayment.electricityBillScreenshot,
+      };
+    }
+    
+    // Only if approval status is REJECTED, allow new attempt
+    if (existingPayment.approvalStatus === 'REJECTED') {
+      attemptNumber = existingPayment.attemptNumber + 1;
+    } else {
+      // For any other case, throw an error
+      throw new Error('Cannot create new payment. Previous payment is still being processed.');
+    }
+  }
+
+  // Get member joining date for due date calculation
+  const member = await prisma.member.findUnique({
+    where: { id: memberId },
+    select: { dateOfJoining: true },
+  });
+
+  if (!member) {
+    throw new Error('Member not found');
+  }
+
+  // Use existing payment's due dates if available, otherwise calculate new ones
+  let dueDate: Date;
+  let overdueDate: Date;
+  
+  if (existingPayment) {
+    // Use the same due dates from existing payment for this month/year
+    dueDate = existingPayment.dueDate;
+    overdueDate = existingPayment.overdueDate;
+  } else {
+    // Calculate due dates based on member's joining date
+    const joiningDate = member.dateOfJoining;
+    const joiningDay = joiningDate.getDate();
+    
+    // Due date is on the same day as joining date in the payment month
+    dueDate = new Date(year, month - 1, joiningDay);
+    
+    if (dueDate.getMonth() !== month - 1) {
+      dueDate = new Date(year, month, 0); // Last day of the payment month
+    }
+    
+    // Overdue date is 7 days after due date
+    overdueDate = new Date(dueDate);
+    overdueDate.setDate(dueDate.getDate() + 7);
+  }
+
+  // Create new payment record
+  const payment = await prisma.payment.create({
+    data: {
+      memberId: memberId,
+      pgId: pgId,
+      month: month,
+      year: year,
+      amount: amount,
+      dueDate: dueDate,
+      overdueDate: overdueDate,
+      rentBillScreenshot: rentBillScreenshot,
+      electricityBillScreenshot: electricityBillScreenshot,
+      paidDate: new Date(),
+      paymentMethod: paymentMethod,
+      attemptNumber: attemptNumber,
+      paymentStatus: 'PAID',
+      approvalStatus: 'PENDING',
+    },
+  });
+
+  return {
+    paymentId: payment.id,
+    amount: payment.amount,
+    paymentMethod: payment.paymentMethod,
+    month: payment.month,
+    year: payment.year,
+    attemptNumber: payment.attemptNumber,
+    status: 'Paid - Pending Approval',
+    paidDate: payment.paidDate,
+    rentBillScreenshot: payment.rentBillScreenshot,
+    electricityBillScreenshot: payment.electricityBillScreenshot,
+  };
 };
 
 // Get member payments history
@@ -227,7 +351,6 @@ export const getMemberPayments = async (req: AuthenticatedMemberRequest, res: Re
       paidDate: payment.paidDate,
       dueDate: payment.dueDate,
       overdueDate: payment.overdueDate,
-      rejectedReason: payment.rejectedReason,
       approvedAt: payment.approvedAt,
       pg: payment.pg,
       createdAt: payment.createdAt,
@@ -239,10 +362,10 @@ export const getMemberPayments = async (req: AuthenticatedMemberRequest, res: Re
       data: {
         payments: paymentsWithStatus,
         pagination: {
-          currentPage: Number(page),
+          page: Number(page),
+          limit: Number(limit),
+          total: totalCount,
           totalPages: Math.ceil(totalCount / Number(limit)),
-          totalCount,
-          hasMore: skip + payments.length < totalCount,
         },
       },
     } as ApiResponse<any>);

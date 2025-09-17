@@ -9,7 +9,7 @@ import {
   calculateRoomUtilization,
   calculatePaymentAnalytics,
   calculateFinancialSummary
-} from '../utils/reportCalculators';
+} from '../utils/pgReportCalculators';
 
 // Helper function to create header section
 const createHeaderSection = (

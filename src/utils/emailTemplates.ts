@@ -1,29 +1,7 @@
-import nodemailer from 'nodemailer';
 import { ENV } from '../config/env';
 
-// Email configuration interface
-interface EmailOptions {
-  to: string;
-  subject: string;
-  body: string;
-  isHTML?: boolean;
-}
-
-// Create email transporter
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    host: ENV.EMAIL_HOST,
-    port: ENV.EMAIL_PORT,
-    secure: ENV.EMAIL_SECURE,
-    auth: {
-      user: ENV.EMAIL_USER,
-      pass: ENV.EMAIL_PASS,
-    },
-  });
-};
-
-// Professional email template wrapper
-const createEmailTemplate = (content: string, subject: string) => {
+// Base HTML email template wrapper
+export const createEmailTemplate = (content: string, subject: string) => {
   return `
     <!DOCTYPE html>
     <html lang="en">
@@ -107,6 +85,18 @@ const createEmailTemplate = (content: string, subject: string) => {
                 border-radius: 5px;
                 margin: 20px 0;
             }
+            .otp-code {
+                background: #007bff;
+                color: white;
+                padding: 20px;
+                border-radius: 8px;
+                text-align: center;
+                margin: 20px 0;
+                font-family: 'Courier New', monospace;
+                letter-spacing: 2px;
+                font-size: 24px;
+                font-weight: bold;
+            }
         </style>
     </head>
     <body>
@@ -155,47 +145,7 @@ const createEmailTemplate = (content: string, subject: string) => {
   `;
 };
 
-// Main email sending function
-export const sendEmail = async (options: EmailOptions): Promise<boolean> => {
-  try {
-    // Validate email configuration
-    if (!ENV.EMAIL_USER || !ENV.EMAIL_PASS) {
-      console.error('Email configuration missing: EMAIL_USER and EMAIL_PASS must be set');
-      return false;
-    }
-
-    const transporter = createTransporter();
-
-    // Create email content
-    const htmlContent = options.isHTML !== false 
-      ? createEmailTemplate(options.body, options.subject)
-      : undefined;
-
-    const mailOptions = {
-      from: `"${ENV.COMPANY_NAME}" <${ENV.EMAIL_FROM}>`,
-      to: options.to,
-      subject: options.subject,
-      text: options.isHTML !== false ? undefined : options.body,
-      html: htmlContent,
-    };
-
-    // Send email
-    const info = await transporter.sendMail(mailOptions);
-    
-    console.log('Email sent successfully:', {
-      messageId: info.messageId,
-      to: options.to,
-      subject: options.subject,
-    });
-
-    return true;
-  } catch (error) {
-    console.error('Failed to send email:', error);
-    return false;
-  }
-};
-
-// Predefined email templates for member approval/rejection
+// Member approval email template
 export const createApprovalEmailContent = (
   memberName: string, 
   memberId: string, 
@@ -208,7 +158,7 @@ export const createApprovalEmailContent = (
   rentType?: 'LONG_TERM' | 'SHORT_TERM',
   pricePerDay?: number,
   dateOfRelieving?: Date,
-  otpCode?: string // New parameter for OTP code
+  otpCode?: string
 ) => {
   // Format the date of joining
   const formatDate = (date?: Date) => {
@@ -302,14 +252,12 @@ export const createApprovalEmailContent = (
         <h4 style="margin-top: 0; color: #155724;">🔐 Account Access Information</h4>
         <p style="margin-bottom: 15px;">You can now access your member portal using your email and the temporary OTP below:</p>
         
-        <div style="background: #007bff; color: white; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0;">
-          <h3 style="margin: 0; font-size: 24px; letter-spacing: 2px; font-family: 'Courier New', monospace;">
-            ${otpCode}
-          </h3>
-          <p style="margin: 10px 0 0 0; font-size: 14px; opacity: 0.9;">
-            Your Initial Setup OTP
-          </p>
+        <div class="otp-code">
+          ${otpCode}
         </div>
+        <p style="text-align: center; margin: 10px 0; font-size: 14px; color: #666;">
+          Your Initial Setup OTP
+        </p>
         
         <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0;">
           <p style="margin: 0; color: #856404; font-size: 14px;">
@@ -340,6 +288,7 @@ export const createApprovalEmailContent = (
   `;
 };
 
+// Member rejection email template
 export const createRejectionEmailContent = (memberName: string, pgType: string) => {
   return `
     <h2>Application Update</h2>
@@ -373,5 +322,190 @@ export const createRejectionEmailContent = (memberName: string, pgType: string) 
     
     <p>Best regards,<br>
     <strong>The ${ENV.COMPANY_NAME} Team</strong></p>
+  `;
+};
+
+// Password reset OTP email template
+export const createPasswordResetEmailContent = (userName: string, otpCode: string) => {
+  return `
+    <h2>🔐 Password Reset Request</h2>
+    
+    <p>Dear ${userName},</p>
+    
+    <p>We received a request to reset your password for your ${ENV.COMPANY_NAME} account. If you made this request, please use the OTP code below to reset your password.</p>
+    
+    <div class="highlight-box" style="background-color: #e7f3ff; border-left-color: #007bff;">
+        <h3 style="margin-top: 0; color: #004085;">🔑 Your Password Reset OTP</h3>
+        <div class="otp-code">
+          ${otpCode}
+        </div>
+        <p style="text-align: center; margin: 10px 0; font-size: 14px; color: #666;">
+          Enter this code to reset your password
+        </p>
+    </div>
+    
+    <div class="highlight-box" style="background-color: #fff3cd; border-left-color: #ffc107;">
+        <h4 style="margin-top: 0; color: #856404;">⚠️ Important Security Information:</h4>
+        <ul style="margin-bottom: 0;">
+            <li><strong>Valid for 15 minutes only</strong> - Use this OTP quickly</li>
+            <li><strong>One-time use</strong> - This OTP becomes invalid after use</li>
+            <li><strong>Keep it confidential</strong> - Never share this OTP with anyone</li>
+            <li><strong>Contact support</strong> if you didn't request this reset</li>
+        </ul>
+    </div>
+    
+    <div class="highlight-box">
+        <h4 style="margin-top: 0; color: #667eea;">📋 How to Reset Your Password:</h4>
+        <ol style="margin-bottom: 0;">
+            <li>Go to the password reset page</li>
+            <li>Enter your email address</li>
+            <li>Enter the OTP code: <strong>${otpCode}</strong></li>
+            <li>Create a new, strong password</li>
+            <li>Confirm your new password</li>
+            <li>Login with your new credentials</li>
+        </ol>
+    </div>
+    
+    <div class="highlight-box" style="background-color: #f8d7da; border-left-color: #dc3545;">
+        <h4 style="margin-top: 0; color: #721c24;">🚨 Didn't Request This?</h4>
+        <p style="margin-bottom: 0;">
+            If you didn't request a password reset, please ignore this email. Your password will remain unchanged. 
+            However, we recommend contacting our support team immediately if you suspect unauthorized access to your account.
+        </p>
+    </div>
+    
+    <p>For your security, this OTP will expire in 15 minutes. If you need a new OTP, please make another password reset request.</p>
+    
+    <p>Best regards,<br>
+    <strong>The ${ENV.COMPANY_NAME} Security Team</strong></p>
+  `;
+};
+
+// Welcome email template for new registrations
+export const createWelcomeEmailContent = (userName: string, tempPassword?: string) => {
+  return `
+    <h2>🎉 Welcome to ${ENV.COMPANY_NAME}!</h2>
+    
+    <p>Dear ${userName},</p>
+    
+    <p>Welcome to the ${ENV.COMPANY_NAME} family! We're excited to have you as part of our community.</p>
+    
+    <div class="highlight-box">
+        <h3 style="margin-top: 0; color: #28a745;">✅ Your Registration is Complete</h3>
+        <p>Your account has been successfully created and you can now access all our services.</p>
+    </div>
+    
+    ${tempPassword ? `
+    <div class="highlight-box" style="background-color: #e7f3ff; border-left-color: #007bff;">
+        <h4 style="margin-top: 0; color: #004085;">🔐 Your Account Credentials</h4>
+        <p><strong>Email:</strong> Your registered email address</p>
+        <p><strong>Temporary Password:</strong></p>
+        <div class="otp-code">
+          ${tempPassword}
+        </div>
+        <p style="text-align: center; margin: 10px 0; font-size: 14px; color: #666;">
+          Please change this password after your first login
+        </p>
+    </div>
+    
+    <div class="highlight-box" style="background-color: #fff3cd; border-left-color: #ffc107;">
+        <h4 style="margin-top: 0; color: #856404;">🔒 Security Reminder</h4>
+        <ul style="margin-bottom: 0;">
+            <li>Change your password immediately after first login</li>
+            <li>Choose a strong password with at least 8 characters</li>
+            <li>Include uppercase, lowercase, numbers, and special characters</li>
+            <li>Never share your login credentials with anyone</li>
+        </ul>
+    </div>
+    ` : ''}
+    
+    <div class="highlight-box">
+        <h4 style="margin-top: 0; color: #667eea;">🚀 What You Can Do Now:</h4>
+        <ul style="margin-bottom: 0;">
+            <li>Access your member dashboard</li>
+            <li>View your accommodation details</li>
+            <li>Track your payment history</li>
+            <li>Submit service requests</li>
+            <li>Update your profile information</li>
+            <li>Contact our support team anytime</li>
+        </ul>
+    </div>
+    
+    <p>We're committed to providing you with the best possible experience. If you have any questions or need assistance, our support team is always here to help.</p>
+    
+    <p>Thank you for choosing ${ENV.COMPANY_NAME}. We look forward to serving you!</p>
+    
+    <p>Best regards,<br>
+    <strong>The ${ENV.COMPANY_NAME} Team</strong></p>
+  `;
+};
+
+// Payment confirmation email template
+export const createPaymentConfirmationEmailContent = (
+  memberName: string,
+  amount: number,
+  paymentMethod: string,
+  transactionId?: string,
+  month?: number,
+  year?: number,
+  paymentType: string = 'Monthly Rent'
+) => {
+  const formatCurrency = (amount: number) => `₹${amount.toLocaleString('en-IN')}`;
+  
+  const getMonthName = (month?: number) => {
+    if (!month) return 'N/A';
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    return months[month - 1] || 'N/A';
+  };
+
+  return `
+    <h2>✅ Payment Confirmation</h2>
+    
+    <p>Dear ${memberName},</p>
+    
+    <p>We have successfully received your payment. Thank you for your prompt payment!</p>
+    
+    <div class="highlight-box" style="background-color: #d4edda; border-left-color: #28a745;">
+        <h3 style="margin-top: 0; color: #155724;">💰 Payment Details</h3>
+        <p><strong>Amount Paid:</strong> ${formatCurrency(amount)}</p>
+        <p><strong>Payment Type:</strong> ${paymentType}</p>
+        ${month && year ? `<p><strong>For Period:</strong> ${getMonthName(month)} ${year}</p>` : ''}
+        <p><strong>Payment Method:</strong> ${paymentMethod}</p>
+        ${transactionId ? `<p><strong>Transaction ID:</strong> ${transactionId}</p>` : ''}
+        <p><strong>Payment Date:</strong> ${new Date().toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        })}</p>
+        <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">Confirmed ✅</span></p>
+    </div>
+    
+    <div class="highlight-box">
+        <h4 style="margin-top: 0; color: #667eea;">📄 Important Information:</h4>
+        <ul style="margin-bottom: 0;">
+            <li>Keep this email as your payment receipt</li>
+            <li>Your payment has been recorded in our system</li>
+            <li>You can view all payment history in your member portal</li>
+            <li>Contact us if you notice any discrepancies</li>
+        </ul>
+    </div>
+    
+    <div class="highlight-box" style="background-color: #e7f3ff; border-left-color: #007bff;">
+        <h4 style="margin-top: 0; color: #004085;">🗓️ Next Payment Reminder</h4>
+        <p style="margin-bottom: 0;">
+            ${paymentType === 'Monthly Rent' && month && year ? 
+              `Your next monthly rent payment will be due on the same date next month (${getMonthName(month === 12 ? 1 : month + 1)} ${month === 12 ? year + 1 : year}).` :
+              'We will notify you when your next payment is due.'
+            }
+        </p>
+    </div>
+    
+    <p>Thank you for being a valued member of ${ENV.COMPANY_NAME}. We appreciate your timely payments!</p>
+    
+    <p>Best regards,<br>
+    <strong>The ${ENV.COMPANY_NAME} Accounts Team</strong></p>
   `;
 };

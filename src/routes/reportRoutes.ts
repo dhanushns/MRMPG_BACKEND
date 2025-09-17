@@ -14,6 +14,7 @@ import {
   getMonthlyFinancialSummary
 } from "../controllers/reportTableController";
 import { downloadReport } from "../controllers/reportDownloadController";
+import { getAvailableWeeks, getAvailableMonths } from "../controllers/filtersController";
 import { authenticateAdmin } from "../middlewares/auth";
 import { validateParams, validateQuery } from "../middlewares/validation";
 import { 
@@ -29,6 +30,10 @@ const router = Router();
 
 // All routes require authentication
 router.use(authenticateAdmin);
+
+// Options routes for available weeks and months
+router.get("/options/weeks", getAvailableWeeks);
+router.get("/options/months", getAvailableMonths);
 
 // Weekly Report Cards Route
 router.get(

@@ -39,11 +39,11 @@ export const getMembersPaymentData = async (
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
 
-    // Get filter parameters from query - handle multiple values
+    // Get filter parameters from query
     const search = req.query.search as string;
     const rentType = req.query.rentType as string;
-    const paymentStatus = (req.query.paymentStatus as string) || "PAID";
-    const approvalStatus = (req.query.approvalStatus as string) || "PENDING";
+    const paymentStatus = req.query.paymentStatus as string;
+    const approvalStatus = req.query.approvalStatus as string;
 
     // Get sorting parameters
     const sortBy = (req.query.sortBy as string) || "createdAt";
@@ -67,32 +67,6 @@ export const getMembersPaymentData = async (
     const requestedYear =
       parseInt(req.query.year as string) || now.getFullYear();
 
-    // Check if requested month/year is in the future
-    const currentMonth = now.getMonth() + 1;
-    const currentYear = now.getFullYear();
-
-    const isFutureMonth =
-      requestedYear > currentYear ||
-      (requestedYear === currentYear && requestedMonth > currentMonth);
-
-    // If requesting future data, return empty result since no payment records should exist
-    if (isFutureMonth) {
-      res.status(200).json({
-        success: true,
-        message: `No payment data available for future month ${requestedMonth}/${requestedYear}`,
-        data: {
-          tableData: [],
-          pagination: {
-            page,
-            limit,
-            total: 0,
-            totalPages: 0,
-          },
-        },
-      } as ApiResponse<any>);
-      return;
-    }
-
     // Get all PGs of admin's type
     const pgs = await prisma.pG.findMany({
       where: { type: admin.pgType },
@@ -101,22 +75,35 @@ export const getMembersPaymentData = async (
 
     const pgIds = pgs.map((pg) => pg.id);
 
-    // Only get members who have actual payment records for the requested month/year
-    // This ensures we only work with stored database values
-    const whereClause: any = {
+    // Build where clause for payments
+    const paymentWhereClause: any = {
+      pgId: { in: pgIds },
+      month: requestedMonth,
+      year: requestedYear,
+    };
+
+    // Apply payment status filter
+    if (paymentStatus && ["PAID", "PENDING", "OVERDUE"].includes(paymentStatus)) {
+      paymentWhereClause.paymentStatus = paymentStatus;
+    }
+
+    // Apply approval status filter
+    if (approvalStatus && ["APPROVED", "PENDING", "REJECTED"].includes(approvalStatus)) {
+      paymentWhereClause.approvalStatus = approvalStatus;
+    }
+
+    // Build where clause for members
+    const memberWhereClause: any = {
       pgId: { in: pgIds },
       isActive: true,
       payment: {
-        some: {
-          month: requestedMonth,
-          year: requestedYear,
-        },
+        some: paymentWhereClause,
       },
     };
 
-    // Apply filters
+    // Apply member filters
     if (rentType) {
-      whereClause.rentType = rentType;
+      memberWhereClause.rentType = rentType;
     }
 
     // Filter by multiple PG locations
@@ -131,42 +118,21 @@ export const getMembersPaymentData = async (
       const pgIdsInLocation = pgsInLocation.map((pg) => pg.id);
 
       if (pgIdsInLocation.length > 0) {
-        whereClause.pgId = { in: pgIdsInLocation };
+        memberWhereClause.pgId = { in: pgIdsInLocation };
       } else {
-        // If no PGs found in locations, return empty result
-        whereClause.pgId = { in: [] };
+        memberWhereClause.pgId = { in: [] };
       }
     }
 
-    // Remove the dateOfJoining filter since we're only working with existing payment records
-    // The payment records themselves will determine which members have data for the requested month
-
+    // Apply search filter
     if (search) {
-      whereClause.OR = [
+      memberWhereClause.OR = [
         { name: { contains: search, mode: "insensitive" } },
         { memberId: { contains: search, mode: "insensitive" } },
         { email: { contains: search, mode: "insensitive" } },
         { phone: { contains: search, mode: "insensitive" } },
       ];
     }
-
-    // Update overdue payment statuses in real-time before fetching data
-    const currentTime = new Date();
-    await prisma.payment.updateMany({
-      where: {
-        pgId: { in: pgIds },
-        month: requestedMonth,
-        year: requestedYear,
-        approvalStatus: "PENDING",
-        paymentStatus: "PENDING",
-        overdueDate: {
-          lt: currentTime,
-        },
-      },
-      data: {
-        paymentStatus: "OVERDUE",
-      },
-    });
 
     // Build order by clause for sorting
     const buildOrderBy = (sortBy: string, sortOrder: string): any => {
@@ -177,8 +143,6 @@ export const getMembersPaymentData = async (
         case "memberId":
         case "dateOfJoining":
         case "createdAt":
-        case "age":
-        case "location":
         case "work":
           return { [sortBy]: order };
         case "pgName":
@@ -196,12 +160,12 @@ export const getMembersPaymentData = async (
 
     // Get total count for pagination
     const total = await prisma.member.count({
-      where: whereClause,
+      where: memberWhereClause,
     });
 
-    // Get members with related data including current month payment
+    // Get members with related data including requested month payment
     const members = await prisma.member.findMany({
-      where: whereClause,
+      where: memberWhereClause,
       include: {
         pg: {
           select: {
@@ -221,6 +185,7 @@ export const getMembersPaymentData = async (
           where: {
             month: requestedMonth,
             year: requestedYear,
+            ...paymentWhereClause,
           },
           select: {
             id: true,
@@ -237,6 +202,10 @@ export const getMembersPaymentData = async (
             attemptNumber: true,
             createdAt: true,
           },
+          orderBy: {
+            attemptNumber: 'desc',
+          },
+          take: 1, // Get only the latest attempt
         },
       },
       skip: offset,
@@ -244,89 +213,48 @@ export const getMembersPaymentData = async (
       orderBy: buildOrderBy(sortBy, sortOrder),
     });
 
-    // Process members data using only stored payment data from database
-    const processedMembers = members
-      .map((member) => {
-        // Find requested month payment - this MUST exist since we filtered for it
-        const requestedMonthPayment = member.payment.find(
-          (p) => p.month === requestedMonth && p.year === requestedYear
-        );
+    // Process members data - just flatten the structure
+    const processedMembers = members.map((member) => {
+      // Get the payment for requested month (should exist since we filtered for it)
+      const requestedMonthPayment = member.payment[0];
 
-        // Flatten the data structure - extract pg and room data to top level
-        const { payment, pg, room, ...memberData } = member;
+      // Flatten the data structure
+      const { payment, pg, room, ...memberData } = member;
 
-        // Use stored values from database only
-        if (!requestedMonthPayment) {
-          // This should not happen since we filtered for existing payment records
-          // But adding as safety check - skip this member
-          return null;
-        }
-
-        return {
-          ...memberData,
-          pgLocation: pg?.location || "",
-          pgName: pg?.name || "",
-          roomNo: room?.roomNo || "",
-          rentAmount: room?.rent || 0,
-          // Use stored payment status and approval status from database
-          requestedMonthPaymentStatus: requestedMonthPayment.paymentStatus,
-          requestedMonthApprovalStatus: requestedMonthPayment.approvalStatus,
-          requestedMonthPayment: {
-            id: requestedMonthPayment.id,
-            amount: requestedMonthPayment.amount,
-            paymentStatus: requestedMonthPayment.paymentStatus,
-            approvalStatus: requestedMonthPayment.approvalStatus,
-            month: requestedMonthPayment.month,
-            year: requestedMonthPayment.year,
-            attemptNumber: requestedMonthPayment.attemptNumber,
-            dueDate: requestedMonthPayment.dueDate,
-            overdueDate: requestedMonthPayment.overdueDate,
-            paidDate: requestedMonthPayment.paidDate,
-            rentBillScreenshot: requestedMonthPayment.rentBillScreenshot,
-            electricityBillScreenshot:
-              requestedMonthPayment.electricityBillScreenshot,
-            createdAt: requestedMonthPayment.createdAt,
-          },
-          hasRequestedMonthPayment: true,
-        };
-      })
-      .filter((member) => member !== null); // Remove any null entries
-
-    // Apply payment status and approval status filters after processing
-    let filteredMembers = processedMembers;
-
-    if (
-      paymentStatus &&
-      ["PAID", "PENDING", "OVERDUE"].includes(paymentStatus)
-    ) {
-      filteredMembers = filteredMembers.filter(
-        (member) => member.requestedMonthPaymentStatus === paymentStatus
-      );
-    }
-
-    if (
-      approvalStatus &&
-      ["APPROVED", "PENDING", "REJECTED"].includes(approvalStatus)
-    ) {
-      filteredMembers = filteredMembers.filter(
-        (member) => member.requestedMonthApprovalStatus === approvalStatus
-      );
-    }
-
-    // Since we're only working with existing payment records,
-    // the total count is based on the filtered results
-    const finalTotal = filteredMembers.length;
-
-    // Apply pagination to filtered results
-    const paginatedMembers = filteredMembers.slice(offset, offset + limit);
+      return {
+        ...memberData,
+        pgLocation: pg?.location || "",
+        pgName: pg?.name || "",
+        roomNo: room?.roomNo || "",
+        rentAmount: room?.rent || 0,
+        requestedMonthPaymentStatus: requestedMonthPayment?.paymentStatus || "PENDING",
+        requestedMonthApprovalStatus: requestedMonthPayment?.approvalStatus || "PENDING",
+        requestedMonthPayment: requestedMonthPayment ? {
+          id: requestedMonthPayment.id,
+          amount: requestedMonthPayment.amount,
+          paymentStatus: requestedMonthPayment.paymentStatus,
+          approvalStatus: requestedMonthPayment.approvalStatus,
+          month: requestedMonthPayment.month,
+          year: requestedMonthPayment.year,
+          attemptNumber: requestedMonthPayment.attemptNumber,
+          dueDate: requestedMonthPayment.dueDate,
+          overdueDate: requestedMonthPayment.overdueDate,
+          paidDate: requestedMonthPayment.paidDate,
+          rentBillScreenshot: requestedMonthPayment.rentBillScreenshot,
+          electricityBillScreenshot: requestedMonthPayment.electricityBillScreenshot,
+          createdAt: requestedMonthPayment.createdAt,
+        } : null,
+        hasRequestedMonthPayment: !!requestedMonthPayment,
+      };
+    });
 
     const response = {
-      tableData: paginatedMembers,
+      tableData: processedMembers,
       pagination: {
         page,
         limit,
-        total: finalTotal,
-        totalPages: Math.ceil(finalTotal / limit),
+        total,
+        totalPages: Math.ceil(total / limit),
       },
     };
 
@@ -452,9 +380,9 @@ export const approveOrRejectPayment = async (
             paymentStatus: "PAID",
             paidDate: new Date(),
           }),
-          // If rejected, update payment status to OVERDUE
+          // If rejected, update payment status to PENDING
           ...(approvalStatus === "REJECTED" && {
-            paymentStatus: "OVERDUE",
+            paymentStatus: "REJECTED",
           }),
         },
         include: {

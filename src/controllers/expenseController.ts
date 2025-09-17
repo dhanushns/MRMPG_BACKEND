@@ -16,10 +16,19 @@ export const addExpense = async (req: AuthenticatedRequest, res: Response) => {
     if (req.files) {
       const files = Array.isArray(req.files) ? req.files : Object.values(req.files).flat();
       
-      // Save file paths - simplified handling
-      if (files[0]) attachedBill1 = files[0].path || files[0].filename;
-      if (files[1]) attachedBill2 = files[1].path || files[1].filename;
-      if (files[2]) attachedBill3 = files[2].path || files[2].filename;
+      // Convert file paths to web-accessible URLs with forward slashes
+      if (files[0]) {
+        const filePath = files[0].path || files[0].filename;
+        attachedBill1 = '/' + filePath.replace(/\\/g, '/');
+      }
+      if (files[1]) {
+        const filePath = files[1].path || files[1].filename;
+        attachedBill2 = '/' + filePath.replace(/\\/g, '/');
+      }
+      if (files[2]) {
+        const filePath = files[2].path || files[2].filename;
+        attachedBill3 = '/' + filePath.replace(/\\/g, '/');
+      }
     }
 
     const expense = await prisma.expense.create({
@@ -244,9 +253,19 @@ export const updateExpense = async (req: AuthenticatedRequest, res: Response) =>
     if (req.files) {
       const files = Array.isArray(req.files) ? req.files : Object.values(req.files).flat();
       
-      if (files[0]) updateData.attachedBill1 = files[0].path || files[0].filename;
-      if (files[1]) updateData.attachedBill2 = files[1].path || files[1].filename;
-      if (files[2]) updateData.attachedBill3 = files[2].path || files[2].filename;
+      // Convert file paths to web-accessible URLs with forward slashes
+      if (files[0]) {
+        const filePath = files[0].path || files[0].filename;
+        updateData.attachedBill1 = '/' + filePath.replace(/\\/g, '/');
+      }
+      if (files[1]) {
+        const filePath = files[1].path || files[1].filename;
+        updateData.attachedBill2 = '/' + filePath.replace(/\\/g, '/');
+      }
+      if (files[2]) {
+        const filePath = files[2].path || files[2].filename;
+        updateData.attachedBill3 = '/' + filePath.replace(/\\/g, '/');
+      }
     }
 
     const updatedExpense = await prisma.expense.update({

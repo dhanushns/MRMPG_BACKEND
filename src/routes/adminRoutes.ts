@@ -6,6 +6,8 @@ import {
   updateProfile,
   getManagedPGs,
   updateOverduePaymentsEndpoint,
+  cleanupInactiveMembers,
+  updateLeavingRequestDues,
 } from "../controllers/adminController";
 import { validateBody } from "../middlewares/validation";
 import { authenticateAdmin, authorizeAdmin } from "../middlewares/auth";
@@ -36,5 +38,11 @@ router.get("/pgs", getManagedPGs);
 
 // Payment record management routes
 router.post("/payment-records/update-overdue", updateOverduePaymentsEndpoint);
+
+// Member data cleanup routes
+router.post("/members/cleanup-inactive", cleanupInactiveMembers);
+
+// Leaving request management routes
+router.post("/leaving-requests/update-dues", updateLeavingRequestDues);
 
 export default router;

@@ -52,7 +52,7 @@ export interface UpdateRoomRequest {
 // Member related types
 export interface CreateMemberRequest {
   name: string;
-  age: number;
+  dob: string; // Date of birth as ISO string
   gender: Gender;
   location: string;
   pgLocation: string;
@@ -68,7 +68,7 @@ export interface CreateMemberRequest {
 
 export interface PersonalDataValidation {
   name: string;
-  age: number;
+  dob: string; // Date of birth as ISO string
   gender: Gender;
   phone: string;
   email: string;
@@ -83,8 +83,8 @@ export interface GetMembersFilterRequest {
   gender?: Gender;
   rentType?: RentType;
   roomNo?: string;
-  ageMin?: number;
-  ageMax?: number;
+  dobFrom?: string; // Date of birth from (ISO date string)
+  dobTo?: string; // Date of birth to (ISO date string)
   advanceAmountMin?: number;
   advanceAmountMax?: number;
   dateJoinedFrom?: string; // ISO date string

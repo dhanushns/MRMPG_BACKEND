@@ -10,6 +10,7 @@ import {
   getRoomFilterOptions,
   getRoomsByLocation,
   getRoomsByPgId,
+  getAvailableWeeks
 } from "../controllers/filtersController";
 import { validateParams } from "../middlewares/validation";
 import { locationParamSchema } from "../validations/roomValidation";
@@ -40,5 +41,8 @@ router.get(
 router.get("/pg/rooms", getRoomsByPgId);
 
 router.get("/enquiry", getEnquiryFilterOptions);
+
+router.get("/reports/weeks", getAvailableWeeks);
+router.get("/reports/months", getMonthOptionsForYear);
 
 export default router;
