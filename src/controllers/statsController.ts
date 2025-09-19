@@ -2,7 +2,12 @@ import { Response } from "express";
 import prisma from "../config/prisma";
 import { ApiResponse } from "../types/response";
 import { AuthenticatedRequest } from "../middlewares/auth";
-import { PgType } from "@prisma/client";
+import { 
+  getOrComputeReportData, 
+  ReportCardsData,
+  CompleteReportData 
+} from "../utils/pgReportCalculators";
+import { PgType, ReportType } from "@prisma/client";
 
 // Helper function to format dashboard cards
 const formatDashboardCards = (
@@ -1249,7 +1254,7 @@ export const getExpenseStats = async (req: AuthenticatedRequest, res: Response) 
         value: formatCurrency(expenseStats.totalCashInAmount),
         trend: expenseStats.cashInPercentChange >= 0 ? "up" : "down",
         percentage: Math.abs(Math.round(expenseStats.cashInPercentChange)),
-        icon: "trendingUp",
+        icon: "arrowUp",
         color: "success",
         subtitle: `${formatNumber(expenseStats.totalCashInCount)} transactions`,
         paymentBreakdown: {
@@ -1262,7 +1267,7 @@ export const getExpenseStats = async (req: AuthenticatedRequest, res: Response) 
         value: formatCurrency(expenseStats.totalCashOutAmount),
         trend: expenseStats.cashOutPercentChange >= 0 ? "up" : "down",
         percentage: Math.abs(Math.round(expenseStats.cashOutPercentChange)),
-        icon: "trendingDown",
+        icon: "arrowDown",
         color: "error",
         subtitle: `${formatNumber(expenseStats.totalCashOutCount)} transactions`,
         paymentBreakdown: {
@@ -1275,7 +1280,7 @@ export const getExpenseStats = async (req: AuthenticatedRequest, res: Response) 
         value: formatCurrency(expenseStats.netAmount),
         trend: expenseStats.netPercentChange >= 0 ? "up" : "down",
         percentage: Math.abs(Math.round(expenseStats.netPercentChange)),
-        icon: expenseStats.netAmount >= 0 ? "cash" : "minusCircle",
+        icon: "walletIcon",
         color: expenseStats.netAmount >= 0 ? "primary" : "warning",
         subtitle: expenseStats.netAmount >= 0 ? "Profit this month" : "Loss this month",
       },
@@ -1576,6 +1581,318 @@ export const getEnquiryStats = async (
       success: false,
       message: "Internal server error",
       error: "Failed to retrieve enquiry statistics",
+    } as ApiResponse<null>);
+  }
+};
+
+// Helper function to format report stats cards from CompleteReportData
+const formatReportStatsCards = (
+  reportData: CompleteReportData,
+  reportType: 'WEEKLY' | 'MONTHLY',
+  period: number,
+  year: number,
+  pgType: string
+): any[] => {
+  const formatCurrency = (amount: number): string => {
+    return `₹${amount.toLocaleString("en-IN")}`;
+  };
+
+  const formatNumber = (num: number): string => {
+    return num.toLocaleString("en-IN");
+  };
+
+  const formatPercentage = (percent: number): string => {
+    return `${percent >= 0 ? '+' : ''}${percent.toFixed(1)}%`;
+  };
+
+  const getDateRange = (): string => {
+    if (reportType === 'WEEKLY') {
+      return `Week ${period}, ${year}`;
+    } else {
+      const monthNames = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+      ];
+      return `${monthNames[period - 1]} ${year}`;
+    }
+  };
+
+  const cards = reportData.cards;
+
+  return [
+    {
+      title: "New Members",
+      value: formatNumber(cards.newMembers),
+      trend: cards.newMembersTrendPercent >= 0 ? "up" : "down",
+      percentage: Math.abs(cards.newMembersTrendPercent),
+      icon: "userPlus",
+      color: cards.newMembersTrendPercent >= 0 ? "success" : "warning",
+      subtitle: `${formatPercentage(cards.newMembersTrendPercent)} from previous ${reportType.toLowerCase()}`,
+      badge: cards.newMembers > 10 ? {
+        text: "High Growth",
+        color: "success"
+      } : undefined
+    },
+    {
+      title: "Rent Collection",
+      value: formatCurrency(cards.rentCollected),
+      trend: cards.rentCollectedTrendPercent >= 0 ? "up" : "down",
+      percentage: Math.abs(cards.rentCollectedTrendPercent),
+      icon: "indianRupee",
+      color: cards.rentCollectedTrendPercent >= 0 ? "success" : "error",
+      subtitle: `${formatPercentage(cards.rentCollectedTrendPercent)} from previous ${reportType.toLowerCase()}`,
+      badge: cards.rentCollectedTrendPercent >= 20 ? {
+        text: "Excellent",
+        color: "success"
+      } : cards.rentCollectedTrendPercent < -10 ? {
+        text: "Needs Attention",
+        color: "error"
+      } : undefined
+    },
+    {
+      title: "Member Departures",
+      value: formatNumber(cards.memberDepartures),
+      trend: cards.memberDeparturesTrendPercent <= 0 ? "up" : "down", // Lower departures is better
+      percentage: Math.abs(cards.memberDeparturesTrendPercent),
+      icon: "userMinus",
+      color: cards.memberDeparturesTrendPercent <= 0 ? "success" : "warning",
+      subtitle: `${formatPercentage(cards.memberDeparturesTrendPercent)} from previous ${reportType.toLowerCase()}`,
+      badge: cards.memberDepartures > 5 ? {
+        text: "High Turnover",
+        color: "warning"
+      } : undefined
+    },
+    {
+      title: "Total Expenses",
+      value: formatCurrency(cards.totalExpenses),
+      trend: cards.totalExpensesTrendPercent <= 0 ? "up" : "down", // Lower expenses is better
+      percentage: Math.abs(cards.totalExpensesTrendPercent),
+      icon: "trending-down",
+      color: cards.totalExpensesTrendPercent <= 0 ? "success" : "warning",
+      subtitle: `${formatPercentage(cards.totalExpensesTrendPercent)} from previous ${reportType.toLowerCase()}`,
+      badge: cards.totalExpensesTrendPercent > 20 ? {
+        text: "High Increase",
+        color: "error"
+      } : undefined
+    },
+    {
+      title: "Net Profit",
+      value: formatCurrency(cards.netProfit),
+      trend: cards.netProfitTrendPercent >= 0 ? "up" : "down",
+      percentage: Math.abs(cards.netProfitTrendPercent),
+      icon: cards.netProfit >= 0 ? "trending-up" : "trending-down",
+      color: cards.netProfit >= 0 ? 
+        (cards.netProfitTrendPercent >= 0 ? "success" : "warning") : "error",
+      subtitle: `${formatPercentage(cards.netProfitTrendPercent)} from previous ${reportType.toLowerCase()}`,
+      badge: cards.netProfit < 0 ? {
+        text: "Loss",
+        color: "error"
+      } : cards.netProfitTrendPercent >= 15 ? {
+        text: "Strong Growth",
+        color: "success"
+      } : undefined
+    },
+  ];
+};
+
+// Get weekly report statistics in card format
+export const getWeeklyReportStats = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!req.admin?.pgType) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const { weekNumber, year } = req.query;
+    
+    if (!weekNumber || !year) {
+      res.status(400).json({
+        success: false,
+        message: "weekNumber and year parameters are required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const week = parseInt(weekNumber as string);
+    const yearNum = parseInt(year as string);
+    const pgType = req.admin.pgType as PgType;
+
+    // Validate parameters
+    if (week < 1 || week > 53) {
+      res.status(400).json({
+        success: false,
+        message: "Week number must be between 1 and 53",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    if (yearNum < 2020 || yearNum > 2030) {
+      res.status(400).json({
+        success: false,
+        message: "Year must be between 2020 and 2030",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    try {
+      // Get or compute report data using pgReportCalculators
+      const reportData = await getOrComputeReportData(
+        pgType,
+        'WEEKLY',
+        week,
+        yearNum
+      );
+
+      // Format the data into cards format
+      const cards = formatReportStatsCards(
+        reportData,
+        'WEEKLY',
+        week,
+        yearNum,
+        pgType
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Weekly report statistics retrieved successfully",
+        data: {
+          cards,
+          lastUpdated: new Date(),
+        },
+      } as ApiResponse<any>);
+
+    } catch (error) {
+      console.error('Error getting weekly report data:', error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to retrieve weekly report data",
+        error: error instanceof Error ? error.message : "Unknown error"
+      } as ApiResponse<null>);
+    }
+
+  } catch (error) {
+    console.error("Error getting weekly report stats:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: "Failed to retrieve weekly report statistics",
+    } as ApiResponse<null>);
+  }
+};
+
+// Get monthly report statistics in card format
+export const getMonthlyReportStats = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    if (!req.admin?.pgType) {
+      res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const { month, year } = req.query;
+    
+    if (!month || !year) {
+      res.status(400).json({
+        success: false,
+        message: "month and year parameters are required",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    const monthNum = parseInt(month as string);
+    const yearNum = parseInt(year as string);
+    const pgType = req.admin.pgType as PgType;
+
+    // Validate parameters
+    if (monthNum < 1 || monthNum > 12) {
+      res.status(400).json({
+        success: false,
+        message: "Month must be between 1 and 12",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    if (yearNum < 2020 || yearNum > 2030) {
+      res.status(400).json({
+        success: false,
+        message: "Year must be between 2020 and 2030",
+      } as ApiResponse<null>);
+      return;
+    }
+
+    try {
+      // Get or compute report data using pgReportCalculators
+      const reportData = await getOrComputeReportData(
+        pgType,
+        'MONTHLY',
+        monthNum,
+        yearNum
+      );
+
+      // Format the data into cards format
+      const cards = formatReportStatsCards(
+        reportData,
+        'MONTHLY',
+        monthNum,
+        yearNum,
+        pgType
+      );
+
+      // Check if this is current month for cache status
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = now.getMonth() + 1;
+      
+      const isCurrentMonth = monthNum === currentMonth && yearNum === currentYear;
+      const dataSource = isCurrentMonth ? 'live' : 'cached';
+
+      res.status(200).json({
+        success: true,
+        message: "Monthly report statistics retrieved successfully",
+        data: {
+          cards,
+          summary: {
+            reportType: 'MONTHLY',
+            period: monthNum,
+            year: yearNum,
+            pgType,
+            dataSource,
+            isCurrentPeriod: isCurrentMonth,
+            totalPGs: reportData.tables.pgPerformanceData.length,
+            totalRevenue: reportData.cards.rentCollected,
+            totalExpenses: reportData.cards.totalExpenses,
+            netProfit: reportData.cards.netProfit
+          },
+          lastUpdated: new Date(),
+        },
+      } as ApiResponse<any>);
+
+    } catch (error) {
+      console.error('Error getting monthly report data:', error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to retrieve monthly report data",
+        error: error instanceof Error ? error.message : "Unknown error"
+      } as ApiResponse<null>);
+    }
+
+  } catch (error) {
+    console.error("Error getting monthly report stats:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: "Failed to retrieve monthly report statistics",
     } as ApiResponse<null>);
   }
 };

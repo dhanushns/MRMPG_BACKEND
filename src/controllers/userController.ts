@@ -1071,3 +1071,199 @@ export const updateDigitalSignature = async (req: AuthenticatedMemberRequest, re
     } as ApiResponse<null>);
   }
 };
+
+// Get member digital signature
+export const getMemberDigitalSignature = async (req: AuthenticatedMemberRequest, res: Response) => {
+  try {
+    if (!req.member) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      } as ApiResponse<null>);
+    }
+
+    const member = await prisma.member.findUnique({
+      where: { 
+        id: req.member.id 
+      },
+      select: {
+        id: true,
+        name: true,
+        digitalSignature: true
+      }
+    });
+
+    if (!member) {
+      return res.status(404).json({
+        success: false,
+        message: 'Member not found'
+      } as ApiResponse<null>);
+    }
+
+    // Get the image URL if digital signature exists
+    let digitalSignatureUrl = null;
+    if (member.digitalSignature) {
+      const { getImageUrl, ImageType } = await import('../utils/imageUpload');
+      digitalSignatureUrl = getImageUrl(member.digitalSignature, ImageType.DOCUMENT);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Digital signature retrieved successfully',
+      data: {
+        id: member.id,
+        name: member.name,
+        digitalSignature: member.digitalSignature,
+        digitalSignatureUrl
+      }
+    } as ApiResponse<any>);
+
+  } catch (error) {
+    console.error('Get digital signature error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve digital signature',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    } as ApiResponse<null>);
+  }
+};
+
+// Get member document proof
+export const getMemberDocumentProof = async (req: AuthenticatedMemberRequest, res: Response) => {
+  try {
+    if (!req.member) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      } as ApiResponse<null>);
+    }
+
+    const member = await prisma.member.findUnique({
+      where: { 
+        id: req.member.id 
+      },
+      select: {
+        id: true,
+        name: true,
+        documentUrl: true
+      }
+    });
+
+    if (!member) {
+      return res.status(404).json({
+        success: false,
+        message: 'Member not found'
+      } as ApiResponse<null>);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Document proof retrieved successfully',
+      data: {
+        id: member.id,
+        name: member.name,
+        documentUrl: member.documentUrl
+      }
+    } as ApiResponse<any>);
+
+  } catch (error) {
+    console.error('Get document proof error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve document proof',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    } as ApiResponse<null>);
+  }
+};
+
+// Update member document proof
+export const updateMemberDocumentProof = async (req: AuthenticatedMemberRequest, res: Response) => {
+  try {
+    if (!req.member) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authentication required'
+      } as ApiResponse<null>);
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Document file is required'
+      } as ApiResponse<null>);
+    }
+
+    // Get current member to check for existing document
+    const currentMember = await prisma.member.findUnique({
+      where: { id: req.member.id },
+      select: { documentUrl: true }
+    });
+
+    if (!currentMember) {
+      return res.status(404).json({
+        success: false,
+        message: 'Member not found'
+      } as ApiResponse<null>);
+    }
+
+    // Generate document URL
+    const documentUrl = `/uploads/document/${req.file.filename}`;
+
+    // Update member with new document
+    const updatedMember = await prisma.member.update({
+      where: { 
+        id: req.member.id 
+      },
+      data: {
+        documentUrl: documentUrl
+      },
+      select: {
+        id: true,
+        name: true,
+        documentUrl: true
+      }
+    });
+
+    // If there was a previous document, try to delete it
+    if (currentMember.documentUrl) {
+      try {
+        const { deleteImage, ImageType } = await import('../utils/imageUpload');
+        const oldFilename = currentMember.documentUrl.split('/').pop();
+        if (oldFilename) {
+          await deleteImage(oldFilename, ImageType.DOCUMENT);
+        }
+      } catch (cleanupError) {
+        console.warn('Failed to cleanup old document file:', cleanupError);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Document proof updated successfully',
+      data: {
+        id: updatedMember.id,
+        name: updatedMember.name,
+        documentUrl: updatedMember.documentUrl
+      }
+    } as ApiResponse<any>);
+
+  } catch (error) {
+    console.error('Update document proof error:', error);
+    
+    // If there was an error, try to clean up the uploaded file
+    if (req.file) {
+      try {
+        const { deleteImage, ImageType } = await import('../utils/imageUpload');
+        await deleteImage(req.file.filename, ImageType.DOCUMENT);
+      } catch (cleanupError) {
+        console.warn('Failed to cleanup uploaded file after error:', cleanupError);
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update document proof',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    } as ApiResponse<null>);
+  }
+};

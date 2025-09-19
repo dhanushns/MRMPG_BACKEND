@@ -1095,8 +1095,14 @@ export const getAvailableWeeks = async (
     const monthStart = new Date(year, month - 1, 1);
     const monthEnd = new Date(year, month, 0); // Last day of the month
 
+    // Helper function to get week number within the year (1-53)
+    const getWeekNumberInYear = (date: Date): number => {
+      const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
+      const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;
+      return Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+    };
+
     // Calculate weeks within the specified month
-    let weekNumber = 1;
     let currentWeekStart = new Date(monthStart);
 
     while (currentWeekStart <= monthEnd) {
@@ -1117,13 +1123,16 @@ export const getAvailableWeeks = async (
 
       // Only add week if it has started
       if (currentWeekStart <= currentDate) {
+        // Get the absolute week number within the year
+        const weekNumberInYear = getWeekNumberInYear(currentWeekStart);
+        
         const weekData = {
-          week: weekNumber,
+          week: weekNumberInYear, // Week number within the year (1-53)
           month: month,
           year: year,
           startDate: currentWeekStart.toISOString().split('T')[0],
           endDate: weekEnd.toISOString().split('T')[0],
-          label: `Week ${weekNumber} (${currentWeekStart.getDate()}-${weekEnd.getDate()})`,
+          label: `Week ${weekNumberInYear} (${currentWeekStart.getDate()}-${weekEnd.getDate()})`,
         };
         
         weeks.push(weekData);
@@ -1138,7 +1147,6 @@ export const getAvailableWeeks = async (
       // Move to next week
       currentWeekStart = new Date(weekEnd);
       currentWeekStart.setDate(weekEnd.getDate() + 1);
-      weekNumber++;
     }
 
     const monthNames = [

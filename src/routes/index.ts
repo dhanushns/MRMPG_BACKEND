@@ -11,7 +11,6 @@ import reportRoutes from "./reportRoutes";
 import userRoutes from "./userRoutes";
 import userPaymentRoutes from "./userPaymentRoutes";
 import expenseRoutes from "./expenseRoutes";
-import staffRoutes from "./staffRoutes";
 import memberApprovalRoutes from "./memberApprovalRoutes"
 import paymentApprovalRoutes from "./paymentApprovalRoutes"
 import userLeavingRequestRoutes from "./userLeavingRequestRoutes";
@@ -38,7 +37,6 @@ router.use("/rooms", roomRoutes);
 router.use("/enquiry", enquiryRoutes);
 router.use("/report", reportRoutes);
 router.use("/expenses", expenseRoutes);
-router.use("/staff", staffRoutes);
 
 router.use("/user", userRoutes);
 router.use("/user/payments", userPaymentRoutes);

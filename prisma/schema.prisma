@@ -19,8 +19,6 @@ model Admin {
   // Relations
   resolvedEnquiries Enquiry[] // Enquiries resolved by this admin
   expenses          Expense[] // Expenses created by this admin
-  assignedStaff     Staff[]   // Staff assigned by this admin
-  staffPayments     StaffPayment[] // Staff payments processed by this admin
 }
 
 model Enquiry {
@@ -50,7 +48,6 @@ model PG {
   payments        Payment[]
   leavingRequests LeavingRequest[]
   expenses        Expense[]
-  staff           Staff[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 }
@@ -72,15 +69,15 @@ model Room {
 }
 
 model Member {
-  id       String  @id @default(cuid())
-  memberId String  @unique // auto generated unique member ID
+  id       String   @id @default(cuid())
+  memberId String   @unique // auto generated unique member ID
   name     String
   dob      DateTime
   gender   Gender
   location String
-  email    String  @unique
+  email    String   @unique
   password String?
-  phone    String  @unique
+  phone    String   @unique
   work     String
 
   photoUrl         String?
@@ -223,27 +220,27 @@ model PaymentStats {
 }
 
 model Expense {
-  id          String      @id @default(cuid())
-  entryType   EntryType
-  amount      Float
-  date        DateTime
-  partyName   String
-  paymentType PaymentMethod
-  remarks     String?     @db.Text
-  attachedBill1 String?   // URL to first attached file
-  attachedBill2 String?   // URL to second attached file  
-  attachedBill3 String?   // URL to third attached file
-  
+  id            String        @id @default(cuid())
+  entryType     EntryType
+  amount        Float
+  date          DateTime
+  partyName     String
+  paymentType   PaymentMethod
+  remarks       String?       @db.Text
+  attachedBill1 String? // URL to first attached file
+  attachedBill2 String? // URL to second attached file  
+  attachedBill3 String? // URL to third attached file
+
   // Admin who created this expense record
-  createdBy   String
-  admin       Admin       @relation(fields: [createdBy], references: [id], onDelete: Cascade)
-  
+  createdBy String
+  admin     Admin  @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+
   // PG association
-  pgId        String
-  pg          PG          @relation(fields: [pgId], references: [id], onDelete: Cascade)
-  
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  pgId String
+  pg   PG     @relation(fields: [pgId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([pgId])
   @@index([createdBy])
@@ -252,93 +249,79 @@ model Expense {
 }
 
 model ExpenseStats {
-  id                    String    @id @default(cuid())
-  month                 Int       // 1-12
-  year                  Int       // e.g., 2025
-  pgType                PgType    // MENS or WOMENS
-  
+  id     String @id @default(cuid())
+  month  Int // 1-12
+  year   Int // e.g., 2025
+  pgType PgType // MENS or WOMENS
+
   // Cash In Stats
-  totalCashInAmount     Float     @default(0)
-  totalCashInCount      Int       @default(0)
-  
+  totalCashInAmount Float @default(0)
+  totalCashInCount  Int   @default(0)
+
   // Cash Out Stats  
-  totalCashOutAmount    Float     @default(0)
-  totalCashOutCount     Int       @default(0)
-  
+  totalCashOutAmount Float @default(0)
+  totalCashOutCount  Int   @default(0)
+
   // Net amount (Cash In - Cash Out)
-  netAmount             Float     @default(0)
-  
+  netAmount Float @default(0)
+
   // Payment method breakdown for cash out
-  cashOutOnline         Float     @default(0)
-  cashOutCash           Float     @default(0)
-  
+  cashOutOnline Float @default(0)
+  cashOutCash   Float @default(0)
+
   // Payment method breakdown for cash in
-  cashInOnline          Float     @default(0)
-  cashInCash            Float     @default(0)
-  
+  cashInOnline Float @default(0)
+  cashInCash   Float @default(0)
+
   // Trend comparison fields (vs previous month)
-  cashInPercentChange   Float     @default(0) // Percentage change from previous month
-  cashOutPercentChange  Float     @default(0) // Percentage change from previous month
-  netPercentChange      Float     @default(0) // Net amount percentage change
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  cashInPercentChange  Float    @default(0) // Percentage change from previous month
+  cashOutPercentChange Float    @default(0) // Percentage change from previous month
+  netPercentChange     Float    @default(0) // Net amount percentage change
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   @@unique([pgType, month, year])
   @@index([pgType])
   @@index([month, year])
 }
 
-model Staff {
-  id          String        @id @default(cuid())
-  name        String
-  phoneNo     String        @unique
-  gender      Gender
-  salary      Float
-  
-  // PG assignment
-  pgId        String
-  pg          PG            @relation(fields: [pgId], references: [id], onDelete: Cascade)
-  
-  // Admin who assigned this staff
-  assignedBy  String
-  admin       Admin         @relation(fields: [assignedBy], references: [id], onDelete: Cascade)
-  
-  // Payment history
-  paymentHistory StaffPayment[]
-  
-  isActive    Boolean       @default(true)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+model Report {
+  id          String     @id @default(cuid())
+  pgType      PgType
+  year        Int
+  reportType  ReportType
+  period      Int
+  periodStart DateTime
+  periodEnd   DateTime
 
-  @@index([pgId])
-  @@index([assignedBy])
-  @@index([isActive])
-}
+  //Cards data
+  newMembers             Int
+  newMembersTrendPercent Float
 
-model StaffPayment {
-  id          String        @id @default(cuid())
-  staffId     String
-  staff       Staff         @relation(fields: [staffId], references: [id], onDelete: Cascade)
-  
-  amount      Float
-  month       Int           // 1-12
-  year        Int           // e.g., 2025
-  paymentDate DateTime
-  paymentType PaymentMethod
-  remarks     String?       @db.Text
-  
-  // Admin who processed this payment
-  paidBy      String
-  admin       Admin         @relation(fields: [paidBy], references: [id], onDelete: Cascade)
-  
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  rentCollected             Float
+  rentCollectedTrendPercent Float
 
-  @@unique([staffId, month, year])
-  @@index([staffId])
-  @@index([paidBy])
-  @@index([month, year])
-  @@index([paymentDate])
+  memberDepartures             Int
+  memberDeparturesTrendPercent Float
+
+  totalExpenses             Float
+  totalExpensesTrendPercent Float
+
+  netProfit             Float
+  netProfitTrendPercent Float
+
+  // Table data as JSON
+  pgPerformanceData    Json
+  roomUtilizationData  Json
+  paymentAnalyticsData Json
+  financialSummaryData Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([pgType, reportType, period, year])
+  @@index([reportType, year, period])
+  @@index([createdAt])
 }
 
 enum Gender {
@@ -401,4 +384,9 @@ enum OTPType {
 enum EntryType {
   CASH_IN
   CASH_OUT
+}
+
+enum ReportType {
+  WEEKLY
+  MONTHLY
 }

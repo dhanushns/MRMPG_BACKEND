@@ -247,7 +247,7 @@ export const getRoomById = async (
             id: true,
             memberId: true,
             name: true,
-            age: true,
+            dob: true,
             gender: true,
             email: true,
             phone: true,

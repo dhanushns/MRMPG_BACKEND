@@ -479,14 +479,14 @@ export const approveOrRejectMember = async (
           },
         });
 
-        // Create new OTP with 24 hours expiry
+
         await prisma.oTP.create({
           data: {
             memberId: result.id,
             email: result.email,
             code: hashedOTP,
             type: 'INITIAL_SETUP',
-            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
           },
         });
       }
