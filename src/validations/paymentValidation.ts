@@ -34,6 +34,7 @@ export const uploadOnlinePaymentSchema = Joi.object({
     Joi.number().integer().min(2020).max(2050),
     Joi.string().pattern(/^(20[2-5][0-9])$/).custom((value) => parseInt(value))
   ).required(),
+  paymentMethod: Joi.string().valid('ONLINE').required(),
 });
 
 // Legacy schema for backward compatibility
